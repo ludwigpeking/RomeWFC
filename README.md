@@ -306,3 +306,23 @@ every lasting property; huts pay nothing) and spends it. All its numbers are par
 - **The wall is convex**: it is the ring round the convex hull of what it protects (`planTheWall`
   in `city.js`); what lies far apart gets rings of its own, and rings that would cross are made
   one. The Works data layer shows walls, gates, the aqueduct, fountains and the ground within.
+
+## The economy (settlement.js, second version)
+
+Households no longer earn from passers-by; the town is a model of land and property.
+- Land price (a m²) = traffic × security × `landPriceScale`. Traffic: every journey adds its weight
+  (merchant 2, farmer 1) along its way, half beside it, slowly forgotten. Security: a farmer adds 2
+  within 3 steps of its home, a merchant 1, a public building 15 within 8 steps.
+- Worth of a point = land (16 m² × price) + building (each floor 16 m² × the price of its kind: hut
+  4, house 30, classical 90; worn a little every day). Rent of a day = `rentRateEachDay` × what its
+  floors let for: each floor the land under it times the share of its grade (hut 0.4, house 1,
+  classical 1.5), less off the street and less for each floor up, plus its building; times how well
+  it is managed (less far from home) and more beside gardens. Tax = `taxShareOfPropertyEachDay` × worth.
+- Every few days a household does the one investment with the best rent for its cost, if it beats
+  `requiredReturnEachDay`: build up, rebuild in another kind (a classical ground floor, a classical
+  top floor, all classical), a garden, free land bought from the city and built on, or a
+  neighbour's parcel at a premium. Floors higher up cost more and let for less.
+- Farmers settle by free land, few farmers and security, live off the land and go to the temple and
+  the venues; merchants settle on the dearest land they can pay and go also to two other towns on
+  the rim. A farmer on dear land turns merchant.
+- The city sells the land, takes the tax, buys buildings in the way of traffic and opens ways.

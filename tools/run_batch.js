@@ -39,19 +39,19 @@ const PICTURE_HEIGHT = 900;
 // The span each parameter is drawn from, evenly (or evenly over whole numbers); the ground is
 // the square one and the large irregular one in turn.
 const PARAMETER_SPANS = {
-    moneyScaleOfStages: { least: 0.4, most: 2.0 },
-    moneyShareForEachFurtherBlock: { least: 0.0, most: 0.6 },
-    moneyKeptEachDay: { least: 0.994, most: 0.999, decimals: 4 },
+    landPriceScale: { least: 0.0002, most: 0.001, decimals: 5 },
+    rentRateEachDay: { least: 0.0012, most: 0.003, decimals: 5 },
+    requiredReturnEachDay: { least: 0.0018, most: 0.004, decimals: 5 },
+    depreciationEachDay: { least: 0.0001, most: 0.0008, decimals: 5 },
+    constructionCostGrowthPerLevel: { least: 1.1, most: 1.5 },
+    managementLossPerCell: { least: 0.01, most: 0.12, decimals: 3 },
+    acquisitionPremium: { least: 0.1, most: 0.6 },
+    gardenRentBonus: { least: 0.05, most: 0.3 },
+    shareOfFarmers: { least: 0.2, most: 0.8 },
+    farmYieldEachDay: { least: 0.02, most: 0.12, decimals: 3 },
     journeysPerHouseholdEachDay: { least: 0.15, most: 0.6 },
     chanceOfAnArrivalEachDay: { least: 0.2, most: 0.8 },
-    mostGroundSettled: { least: 0.3, most: 0.6 },
-    shareOfTheBusiestStreet: { least: 0.25, most: 0.6 },
-    chanceOfAShopOpeningEachDay: { least: 0.003, most: 0.03, decimals: 4 },
-    chanceOfAClaimEachDay: { least: 0.01, most: 0.08, decimals: 3 },
-    mostPointsOfAHousehold: { least: 2, most: 12, isWhole: true },
-    moneyHeldForABuyOut: { least: 1.5, most: 5.0 },
-    stepsABuildingCosts: { least: 2, most: 10, isWhole: true },
-    moneyWorthOfAStepSaved: { least: 4, most: 25, isWhole: true },
+    householdsForEachTower: { least: 60, most: 300, isWhole: true },
 };
 
 // a repeatable source of chance, so that a batch can be made again
@@ -195,7 +195,10 @@ async function main() {
             const monuments = Object.keys(run.monuments).map(function (monumentName) { return run.monuments[monumentName] + " " + monumentName; }).join("; ");
             lines.push([run.name, run.ground, run.seed].concat(
                 parameterNames.map(function (parameterName) { return run.parameters[parameterName] === undefined ? "" : run.parameters[parameterName]; }),
-                statisticNames.map(function (statisticName) { return run.statistics[statisticName] === undefined ? "" : run.statistics[statisticName]; }),
+                statisticNames.map(function (statisticName) {
+                    const value = run.statistics[statisticName] === undefined ? "" : String(run.statistics[statisticName]);
+                    return /[",]/.test(value) ? '"' + value.replace(/"/g, '""') + '"' : value;
+                }),
                 ['"' + monuments + '"']).join(","));
         });
         fs.writeFileSync(path.join(runDirectory, "runs.csv"), lines.join("\n") + "\n");

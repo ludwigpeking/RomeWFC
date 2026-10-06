@@ -21,7 +21,7 @@ const PICTURE_WIDTH = 1920;
 const PICTURE_HEIGHT = 1080;
 const FRAMES_PER_SECOND = 30;
 
-const ALL_DATA_LAYERS = ["none", "traffic", "streets", "owners", "stage", "money", "worth", "pressure", "works"];
+const ALL_DATA_LAYERS = ["none", "traffic", "streets", "security", "landPrice", "owners", "livelihood", "rent", "worth", "money", "pressure", "works"];
 
 // The shots. growth: a settlement from its first day, so many days for every frame, the camera
 // going slowly round it and coming nearer as it grows. orbit: a saved town, once round it.

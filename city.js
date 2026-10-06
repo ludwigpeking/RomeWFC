@@ -39,7 +39,7 @@ import { latticePatch } from './charts';
 import { cellSize } from './parts';
 
 export const CITY_PARAMETER_DEFAULTS = {
-  taxShareOfPropertyEachDay: 0.0006,       // of the worth of every lasting property
+  taxShareOfPropertyEachDay: 0.0003,       // of the worth of every property, land and building (settlement.js takes it)
   householdsScaleOfPublicBuildings: 1,     // all the bars of the public buildings, times this
   householdsForTheFirstFountain: 50,
   householdsUnservedForAnotherFountain: 40,
@@ -76,7 +76,6 @@ const daysBetweenPlans = 10;
 // a search that found nothing (no site for a building, no wall worth building) is not made
 // again for a while: the town has to change first
 const daysBeforeAFailedSearchIsRepeated = 150;
-const firstLastingStage = 2; // the stages before it are huts
 
 // The city of a settlement: its treasury and what it owns. It stands in the place of a household
 // on the points of its buildings, so that nobody else builds or walks there.
@@ -88,29 +87,11 @@ export function createCity() {
 // One day of the city: the tax, and every few days perhaps one thing built. Returns whether the
 // volume or the works changed.
 export function runTheCity(settlement) {
-  collectTheTax(settlement);
   if (settlement.dayCount % daysBetweenPlans !== 0) {
     return false;
   }
   // (the wall before the next public building: it is wanted first, and decides where they go)
   return buildAFountainIfNeeded(settlement) || buildTheWallIfDue(settlement) || buildAPublicBuildingIfDue(settlement);
-}
-
-function collectTheTax(settlement) {
-  const city = settlement.city;
-  const share = settlement.parameters.taxShareOfPropertyEachDay;
-  settlement.households.forEach(function (household) {
-    let worthOfProperty = 0;
-    household.pointIndices.forEach(function (pointIndex) {
-      if (settlement.stageOfPoint[pointIndex] >= firstLastingStage) {
-        worthOfProperty += settlement.worthOfBuildingOn(pointIndex);
-      }
-    });
-    const tax = Math.min(household.money, worthOfProperty * share);
-    household.money -= tax;
-    city.money += tax;
-    city.moneyCollected += tax;
-  });
 }
 
 function writeInTheChronicle(settlement, text) {
@@ -238,6 +219,7 @@ function buildAPublicBuildingIfDue(settlement) {
     grid: site.grid || null, free: site.free || null, openPoints: site.openPoints || [], day: settlement.dayCount,
   });
   spend(settlement, wanted.money);
+  settlement.raiseSecurityForAPublicBuilding(site.points[Math.floor(site.points.length / 2)].pointIndex);
   const firstPointOfIt = site.points[0].pointIndex;
   writeInTheChronicle(settlement, wanted.kind + ' built at ' + settlement.households.length + ' households, ' +
     (settlement.hasAWall ? (settlement.isWithinWalls[firstPointOfIt] ? 'within the walls' : 'outside the walls') : 'before there was a wall') +
@@ -626,7 +608,7 @@ function buildTheWallIfDue(settlement) {
   const parameters = settlement.parameters;
   let lastingHouseholdCount = 0;
   settlement.households.forEach(function (household) {
-    if (household.stage >= firstLastingStage) {
+    if (settlement.isLastingHousehold(household)) {
       lastingHouseholdCount++;
     }
   });
@@ -637,7 +619,7 @@ function buildTheWallIfDue(settlement) {
     let blocksOutside = 0;
     let blocksInside = 0;
     for (let pointIndex = 0; pointIndex < volume.pointCount; pointIndex++) {
-      if (settlement.stageOfPoint[pointIndex] >= firstLastingStage) {
+      if (settlement.isLastingAt(pointIndex)) {
         if (settlement.isWithinWalls[pointIndex]) {
           blocksInside++;
         } else {
@@ -702,7 +684,7 @@ function planTheWall(settlement) {
   let anythingToProtect = false;
   for (let pointIndex = 0; pointIndex < pointCount; pointIndex++) {
     const household = settlement.ownerOfPoint[pointIndex];
-    const isLasting = settlement.stageOfPoint[pointIndex] >= firstLastingStage || (household !== null && household.isCity) ||
+    const isLasting = settlement.isLastingAt(pointIndex) || (household !== null && household.isCity) ||
       (volume.works[pointIndex] & (WORK.fountain | WORK.passage)) !== 0;
     if (isLasting && !isOnTheRim(pointIndex)) {
       mustBeInside[pointIndex] = 1;
