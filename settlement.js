@@ -107,6 +107,10 @@ const STREET_GRADE = { yard: 0, street: 1, busyStreet: 2 };
 const leastBusyStreetRecentTraffic = 8;
 const shareOfTrafficThatKeepsAGrade = 0.6;
 const pressureKeptEachDay = 0.995;
+// What was settled stays settled for a while: a household does not buy back a parcel it sold so
+// lately, and ground the city opened as road is not sold again so soon
+const daysBeforeBuyingBack = 2000;
+const daysAnOpenedRoadIsKept = 2000;
 
 let parametersInUse = Object.assign({}, SETTLEMENT_PARAMETER_DEFAULTS);
 
@@ -176,6 +180,17 @@ export class Settlement {
     this.journeysToOtherTowns = 0;
     this.landSoldByTheCity = 0;
     this.acquisitionCount = 0;
+    // for seeing whether the town stalls or bounces back: a parcel bought back by a household that
+    // had it before, a building pulled down, a garden built over or a building turned to garden,
+    // a farmer turned merchant
+    this.formerOwnersOfPoint = new Map();
+    this.dayOfSaleOfPoint = new Map();      // point -> { seller (number), day }
+    this.dayARoadWasOpened = new Int32Array(pointCount).fill(-1000000);
+    this.boughtBackCount = 0;
+    this.demolitionCount = 0;
+    this.gardenBuiltOverCount = 0;
+    this.buildingTurnedToGardenCount = 0;
+    this.farmersTurnedMerchantCount = 0;
     this.investmentCountOfKind = {};
     // the city as a whole (city.js): its treasury, its buildings, its wall
     this.city = createCity();
@@ -372,6 +387,7 @@ export class Settlement {
       settlement.keepTheBooks(household);
       if (household.livelihood === 'farmer' && settlement.landPriceAt(household.homePoint) >= parameters.landPriceOfAMerchant) {
         household.livelihood = 'merchant'; // the land it lives on has become too dear to farm
+        settlement.farmersTurnedMerchantCount++;
       }
       if (settlement.dayCount >= household.dayOfNextSearch) {
         household.dayOfNextSearch = settlement.dayCount + parameters.daysBetweenInvestmentSearches;
@@ -517,6 +533,7 @@ export class Settlement {
 
   // A point bought by the city at its worth and cleared
   clearForTheCity(pointIndex) {
+    this.demolitionCount++;
     const household = this.ownerOfPoint[pointIndex];
     const worth = this.worthAsParcel(pointIndex);
     household.money += worth;
@@ -541,6 +558,9 @@ export class Settlement {
   mayTake(pointIndex, isRoadAllowed) {
     if (!this.isFree(pointIndex) || this.isKeptOpen[pointIndex] || this.volume.works[pointIndex] !== 0 || this.map.points[pointIndex].isOnBoundary) {
       return false;
+    }
+    if (this.dayCount - this.dayARoadWasOpened[pointIndex] < daysAnOpenedRoadIsKept) {
+      return false; // the city opened it for the traffic lately
     }
     if (this.isRoad(pointIndex) && (!isRoadAllowed || this.volume.streetGrades[pointIndex] === STREET_GRADE.busyStreet)) {
       return false;
@@ -687,8 +707,13 @@ export class Settlement {
   // What could be built on a point that has a stack: [{ kind, stack, cost }]. A floor more on
   // top (of the same kind, or a classical top floor on a house), a floor or all of it rebuilt in
   // another kind, or, from nothing (or from a garden), a first floor of any kind.
-  buildingChoicesFor(household, stack) {
+  buildingChoicesFor(household, stack, condition) {
     const choices = [];
+    // the building renewed as it is: what it has lost of its worth, paid again
+    if (stack.length > 0 && stack[0] !== TIER.garden && condition !== undefined && condition < 0.7) {
+      const newWorth = this.buildingValueOf(stack, 1);
+      choices.push({ kind: 'renew', stack: stack.slice(), cost: newWorth - this.buildingValueOf(stack, condition) });
+    }
     if (stack.length === 0 || stack[0] === TIER.garden) {
       [TIER.temporary, TIER.vernacular, TIER.classical].forEach(function (tier) {
         choices.push({ kind: 'build', stack: [tier], cost: floorCost(tier, 0) });
@@ -721,11 +746,21 @@ export class Settlement {
     if (stack[0] === TIER.vernacular && levelCount >= 2) {
       choices.push({ kind: 'classicalGroundFloor', stack: [TIER.classical].concat(stack.slice(1)), cost: floorCost(TIER.classical, 0) });
     }
-    if (!isAllClassical && levelCount <= MOST_LEVELS_OF_TIER[TIER.classical]) {
-      const rebuilt = stack.map(function () { return TIER.classical; });
+    if (!isAllClassical) {
+      // (a house taller than a classical block may be, rebuilt lower)
+      const rebuilt = stack.slice(0, MOST_LEVELS_OF_TIER[TIER.classical]).map(function () { return TIER.classical; });
       choices.push({ kind: 'rebuildAsClassical', stack: rebuilt, cost: rebuilt.reduce(function (sum, tier, level) { return sum + floorCost(tier, level); }, 0) });
     }
     return choices;
+  }
+
+  // The return a household asks of an investment: the required return, less where money lies idle.
+  // A household that holds as much money as its property is worth asks half as much; one that holds
+  // little asks the full return. So money that has nowhere to go goes after smaller returns, and a
+  // household rich in money buys from one that is not.
+  hurdleOf(household) {
+    const worth = Math.max(1, household.worth || 0);
+    return parametersInUse.requiredReturnEachDay / (1 + Math.max(0, household.money) / worth);
   }
 
   // A household looks over what it could do and does the best of it, if anything is worth doing:
@@ -740,12 +775,13 @@ export class Settlement {
       return kind !== 'hut' && kind !== 'garden' && kind !== 'none';
     });
     let best = null;
+    const hurdle = this.hurdleOf(household);
     function consider(option) {
       if (option.cost <= 0 || option.cost > household.money) {
         return;
       }
       const returnEachDay = option.rentGained / option.cost;
-      if (returnEachDay >= parameters.requiredReturnEachDay && (best === null || returnEachDay > best.returnEachDay)) {
+      if (returnEachDay >= hurdle && (best === null || returnEachDay > best.returnEachDay)) {
         option.returnEachDay = returnEachDay;
         best = option;
       }
@@ -754,7 +790,7 @@ export class Settlement {
     household.pointIndices.forEach(function (pointIndex) {
       const stack = stackOf(volume, pointIndex);
       const rentNow = settlement.rentOf(pointIndex, stack, settlement.condition[pointIndex], household);
-      settlement.buildingChoicesFor(household, stack).forEach(function (choice) {
+      settlement.buildingChoicesFor(household, stack, settlement.condition[pointIndex]).forEach(function (choice) {
         const rentAfter = settlement.rentOf(pointIndex, choice.stack, 1, household);
         consider({ kind: choice.kind, pointIndex: pointIndex, stack: choice.stack, cost: choice.cost, rentGained: rentAfter - rentNow });
       });
@@ -802,10 +838,19 @@ export class Settlement {
         return;
       }
       // a neighbour's parcel, at its worth and a premium, as it stands
+      // The owner sells only where the price brings it more than keeping the parcel would: where
+      // its own rent from it is less than the return it asks (hurdleOf) on the price. (Without this, two
+      // neighbours buy the same parcel from each other again and again.) Nobody sells its home.
       const stack = stackOf(volume, pointIndex);
+      const price = settlement.worthAsParcel(pointIndex) * (1 + parameters.acquisitionPremium);
+      const rentOfTheSeller = settlement.rentOf(pointIndex, stack, settlement.condition[pointIndex], owner);
+      const lastSale = settlement.dayOfSaleOfPoint.get(pointIndex);
+      const isABuyingBack = lastSale !== undefined && lastSale.seller === household.number && settlement.dayCount - lastSale.day < daysBeforeBuyingBack;
+      if (isABuyingBack || pointIndex === owner.homePoint || rentOfTheSeller >= settlement.hurdleOf(owner) * price) {
+        return;
+      }
       consider({
-        kind: 'acquire', pointIndex: pointIndex, stack: stack, seller: owner,
-        cost: settlement.worthAsParcel(pointIndex) * (1 + parameters.acquisitionPremium),
+        kind: 'acquire', pointIndex: pointIndex, stack: stack, seller: owner, cost: price,
         rentGained: settlement.rentOf(pointIndex, stack, settlement.condition[pointIndex], household),
       });
     });
@@ -814,6 +859,13 @@ export class Settlement {
     }
     this.investmentCountOfKind[best.kind] = (this.investmentCountOfKind[best.kind] || 0) + 1;
     if (best.kind === 'acquire') {
+      const formerOwners = this.formerOwnersOfPoint.get(best.pointIndex) || [];
+      if (formerOwners.indexOf(household.number) >= 0) {
+        this.boughtBackCount++;
+      }
+      formerOwners.push(best.seller.number);
+      this.dayOfSaleOfPoint.set(best.pointIndex, { seller: best.seller.number, day: this.dayCount });
+      this.formerOwnersOfPoint.set(best.pointIndex, formerOwners.slice(-4));
       household.money -= best.cost;
       best.seller.money += best.cost;
       this.takePoint(best.pointIndex);
@@ -828,6 +880,12 @@ export class Settlement {
     } else {
       household.money -= best.cost;
       this.volume.shopFronts.delete(best.pointIndex);
+      const wasAGarden = this.volume.tierAt(best.pointIndex, 0) === TIER.garden;
+      if (wasAGarden && best.kind !== 'garden') {
+        this.gardenBuiltOverCount++;
+      } else if (!wasAGarden && best.kind === 'garden' && this.volume.tierAt(best.pointIndex, 0) !== TIER.empty) {
+        this.buildingTurnedToGardenCount++;
+      }
     }
     this.buildOnPoint(best.pointIndex, best.stack);
     this.condition[best.pointIndex] = 1;
@@ -987,6 +1045,7 @@ export class Settlement {
   // A building in the way: the city buys it at its worth, pulls it down, and the ground is road again
   breakDown(pointIndex) {
     this.clearForTheCity(pointIndex);
+    this.dayARoadWasOpened[pointIndex] = this.dayCount;
     this.recentTraffic[pointIndex] = Math.max(this.recentTraffic[pointIndex], roadRecentTraffic);
     this.brokenBuildingCount++;
   }
@@ -1256,6 +1315,67 @@ export class Settlement {
       return Math.min(1, this.pressure[pointIndex] * parametersInUse.moneyWorthOfAStepSaved / Math.max(1, this.worthAsParcel(pointIndex)));
     }
     return null;
+  }
+
+  // The numbers that show whether the town grows, stalls or bounces back, and how varied it is
+  studyNumbers() {
+    const settlement = this;
+    const volume = this.volume;
+    const worths = [];
+    const moneys = [];
+    const levels = [];
+    const countOfKind = {};
+    this.households.forEach(function (household) {
+      worths.push(household.worth || 0);
+      moneys.push(household.money);
+    });
+    for (let pointIndex = 0; pointIndex < this.map.points.length; pointIndex++) {
+      const household = this.ownerOfPoint[pointIndex];
+      if (household === null || household.isCity) {
+        continue;
+      }
+      const stack = stackOf(volume, pointIndex);
+      const kind = kindOfStack(stack);
+      countOfKind[kind] = (countOfKind[kind] || 0) + 1;
+      if (kind !== 'garden') {
+        levels.push(stack.length);
+      }
+    }
+    // Gini of a list: 0 all alike, 1 one has all
+    function gini(values) {
+      const sorted = values.slice().sort(function (first, second) { return first - second; });
+      const total = sorted.reduce(function (sum, value) { return sum + Math.max(0, value); }, 0);
+      if (sorted.length === 0 || total <= 0) {
+        return 0;
+      }
+      let weighted = 0;
+      sorted.forEach(function (value, index) { weighted += (index + 1) * Math.max(0, value); });
+      return (2 * weighted) / (sorted.length * total) - (sorted.length + 1) / sorted.length;
+    }
+    // how evenly the blocks are spread over their kinds: 0 all of one kind, 1 evenly over all
+    const kinds = Object.keys(countOfKind);
+    const blockCount = kinds.reduce(function (sum, kind) { return sum + countOfKind[kind]; }, 0);
+    let entropy = 0;
+    kinds.forEach(function (kind) {
+      const share = countOfKind[kind] / blockCount;
+      entropy -= share * Math.log(share);
+    });
+    const meanLevels = levels.reduce(function (sum, value) { return sum + value; }, 0) / Math.max(1, levels.length);
+    const spreadOfLevels = Math.sqrt(levels.reduce(function (sum, value) { return sum + (value - meanLevels) * (value - meanLevels); }, 0) / Math.max(1, levels.length));
+    const sortedMoney = moneys.slice().sort(function (first, second) { return first - second; });
+    return {
+      worthGini: Math.round(gini(worths) * 1000) / 1000,
+      kindEntropy: Math.round(entropy / Math.log(6) * 1000) / 1000,
+      spreadOfLevels: Math.round(spreadOfLevels * 100) / 100,
+      medianMoney: Math.round(sortedMoney.length > 0 ? sortedMoney[Math.floor(sortedMoney.length / 2)] : 0),
+      boughtBack: this.boughtBackCount,
+      demolitions: this.demolitionCount,
+      gardensBuiltOver: this.gardenBuiltOverCount,
+      buildingsTurnedToGarden: this.buildingTurnedToGardenCount,
+      farmersTurnedMerchant: this.farmersTurnedMerchantCount,
+      investmentsOfKind: Object.assign({}, this.investmentCountOfKind),
+      treasury: Math.round(this.city.money),
+    };
   }
 
   // The town in numbers, for comparing one run with another

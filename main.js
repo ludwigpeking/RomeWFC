@@ -1748,6 +1748,26 @@ window.rome = {
     return ranges;
   },
   startMap: function (kind) { return startMap(kind); },
+  // For the study of the economy (tools/economy_study.js): a settlement lived for so many days with
+  // nothing drawn, its numbers taken every so many days. (The ground before the monuments is not
+  // kept open, since that is found when the town is built.)
+  studyEconomy: function (ground, seed, pointsAlongASide, ringCount, parameters, dayCount, daysBetweenSamples) {
+    if (currentMapKind !== ground || squarePointCount !== pointsAlongASide || largeIrregularRingCount !== ringCount) {
+      squarePointCount = pointsAlongASide;
+      largeIrregularRingCount = ringCount;
+      startMap(ground);
+    }
+    volume.clear();
+    settlement = new Settlement(map, volume, seed, parameters || {});
+    const samples = [];
+    for (let day = 1; day <= dayCount; day++) {
+      settlement.step();
+      if (day % daysBetweenSamples === 0) {
+        samples.push(Object.assign({ day: day }, settlement.statistics(), settlement.studyNumbers()));
+      }
+    }
+    return { parameters: settlement.parameters, samples: samples, pointCount: map.points.length };
+  },
   // what the note beside the pointer says of a point while a data layer is on
   describeDataAt: function (pointIndex) { return settlement.describeDataAt(pointIndex); },
   // walking: begin or end a walk, and how many people are shown walking their journeys

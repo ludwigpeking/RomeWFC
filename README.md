@@ -326,3 +326,16 @@ Households no longer earn from passers-by; the town is a model of land and prope
   the venues; merchants settle on the dearest land they can pay and go also to two other towns on
   the rim. A farmer on dear land turns merchant.
 - The city sells the land, takes the tax, buys buildings in the way of traffic and opens ways.
+
+### Checked by a study (tools/economy_study.js, tools/analyse_study.py)
+
+29 runs of 6,000 days (the usual parameters with three seeds, and every parameter lower and higher)
+showed, and led to:
+- parcels bought back and forth between neighbours → an owner sells only where the price is worth
+  more to it than its own rent; nobody sells its home; nobody buys back what it sold in 2,000 days;
+- a stall once land prices levelled off (money piling up, nothing worth building) → the return a
+  household asks falls where money lies idle (`hurdleOf`: required return ÷ (1 + money ÷ worth));
+- every worn house turned into a house with a classical ground floor → a building can be renewed as
+  it is, and a house of any height can be rebuilt classical (at three levels);
+- the city pulling down and the town building again on the same ground → ground opened as road is
+  not sold again for 2,000 days.

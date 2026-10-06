@@ -12,3 +12,4 @@ film/preview/
 film/test_four.jpg
 film/log_*.txt
 __pycache__/
+tools/study/
