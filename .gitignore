@@ -1,0 +1,14 @@
+# installed packages and built copies
+node_modules/
+dist/
+
+# what the tools make: runs, pictures, film frames and footage (large, made again from the code)
+tools/runs/
+tools/pictures/
+tools/film/
+film/footage_raw/
+film/footage/
+film/preview/
+film/test_four.jpg
+film/log_*.txt
+__pycache__/

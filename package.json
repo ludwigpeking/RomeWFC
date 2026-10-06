@@ -1,0 +1,16 @@
+{
+  "name": "rome_wfc",
+  "version": "0.1.0",
+  "description": "Roman architecture from a 3D volume grid: formations, tiers and wave function collapse",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 5210",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "three": "^0.160.1"
+  },
+  "devDependencies": {
+    "vite": "^4.4.9"
+  }
+}

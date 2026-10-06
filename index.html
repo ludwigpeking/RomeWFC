@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rome WFC</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: "Segoe UI", sans-serif;
+      font-size: 13px;
+      color: #23262b;
+    }
+    canvas {
+      display: block;
+    }
+    #toolbar {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      width: 330px;
+      max-height: calc(100vh - 48px);
+      overflow-y: auto;
+      padding: 12px;
+      background: rgba(250, 248, 243, 0.94);
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    }
+    #catalogue {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      bottom: 12px;
+      width: 62vw;
+      padding: 12px;
+      overflow-y: auto;
+      background: rgba(250, 248, 243, 0.94);
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    }
+    .catalogueGrid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr); /* the wide panel shows four pictures in a row */
+      gap: 16px 14px;
+      margin-top: 8px;
+    }
+    .catalogueEntry canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      margin-bottom: 4px;
+      border-radius: 4px;
+      cursor: grab;
+      touch-action: none; /* dragging in a picture turns it */
+    }
+    #catalogue {
+      font-size: 15px;
+    }
+    #catalogue.narrow {
+      width: 340px;
+    }
+    #catalogue.narrow .catalogueGrid, #catalogue.narrow .modelGrid {
+      grid-template-columns: 1fr;
+    }
+    /* two models in a row, each with its two pictures: four pictures in a row; an opened model takes the whole row */
+    .modelGrid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .modelGrid .modelBlock {
+      margin-top: 0;
+    }
+    .modelGrid .modelBlock[open] {
+      grid-column: 1 / -1;
+    }
+    .modelGrid .modelBlock[open] .modelPictures {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    #catalogueWidthButton {
+      position: sticky;
+      top: 0;
+      float: right;
+      z-index: 2;
+      padding: 4px 10px;
+      border: 1px solid #c9c2b3;
+      border-radius: 6px;
+      background: #ffffff;
+      font: inherit;
+      cursor: pointer;
+    }
+    .partsTitle {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .modelBlock {
+      margin-top: 14px;
+      padding: 10px;
+      border: 1px solid #ddd6c6;
+      border-radius: 8px;
+      background: #fbfaf6;
+    }
+    .modelBlock summary {
+      cursor: pointer;
+      list-style: none;
+    }
+    .modelTitle {
+      font-size: 17px;
+      margin-bottom: 8px;
+    }
+    .modelTitle b {
+      color: #9a6a12;
+    }
+    .modelTitle small {
+      display: block;
+      margin-top: 2px;
+      font-size: 13px;
+      color: #6d675c;
+    }
+    .modelPictures {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .modelPictures canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 6px;
+      cursor: grab;
+      touch-action: none;
+    }
+    .catalogueEntry b {
+      color: #9a6a12;
+    }
+    .catalogueEntry small {
+      display: block;
+      margin-top: 2px;
+      color: #6d675c;
+      line-height: 1.35;
+    }
+    #tabButtons {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    #tabButtons button {
+      text-align: center;
+      padding: 7px 2px;
+    }
+    .tabPane {
+      display: none;
+    }
+    .tabPane.shown {
+      display: block;
+    }
+    .parameterRow {
+      display: grid;
+      grid-template-columns: 1fr 84px;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .parameterRow input, .parameterRow select {
+      width: 100%;
+      padding: 4px 6px;
+      border: 1px solid #b9b2a3;
+      border-radius: 4px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    #cityStatistics, #richestHouseholds {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+    }
+    #cityStatistics td, #richestHouseholds td {
+      padding: 2px 0;
+      border-bottom: 1px solid #e6dfd0;
+    }
+    #cityStatistics td:last-child, #richestHouseholds td:last-child {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      padding-left: 8px;
+    }
+    #liveStatistics {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      padding: 8px 12px;
+      background: rgba(250, 248, 243, 0.94);
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+      line-height: 1.5;
+      max-width: 62vw;
+      display: none;
+    }
+    .sectionTitle {
+      margin: 10px 0 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #7b7468;
+    }
+    .sectionTitle:first-child {
+      margin-top: 0;
+    }
+    .buttonRow {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .buttonColumn {
+      display: grid;
+      gap: 6px;
+    }
+    button {
+      padding: 7px 8px;
+      border: 1px solid #b9b2a3;
+      border-radius: 5px;
+      background: #ffffff;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    button.active {
+      background: #3a3f47;
+      border-color: #3a3f47;
+      color: #ffffff;
+    }
+    button small {
+      display: block;
+      opacity: 0.7;
+      font-size: 11px;
+    }
+    .buttonRow button {
+      text-align: center;
+    }
+    .hint {
+      color: #6d675c;
+      line-height: 1.45;
+    }
+    #monumentList {
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+    button.active kbd {
+      background: transparent;
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+    kbd {
+      padding: 0 4px;
+      border: 1px solid #b9b2a3;
+      border-radius: 3px;
+      background: #ffffff;
+      font: inherit;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div id="walkHint" style="position: fixed; top: 12px; left: 50%; transform: translateX(-50%); display: none; padding: 6px 12px; background: rgba(35, 38, 43, 0.9); color: #ffffff; border-radius: 6px;">Walking: W A S D or arrow keys · drag to look round · Shift to run · Esc to leave</div>
+  <div id="liveStatistics"></div>
+  <div id="householdTip" style="position: fixed; display: none; pointer-events: none; padding: 6px 10px; background: rgba(35, 38, 43, 0.92); color: #ffffff; border-radius: 6px; max-width: 420px; line-height: 1.4; z-index: 5;"></div>
+  <div id="toolbar">
+    <div class="buttonColumn" style="margin-bottom: 10px;">
+      <button id="walkButton" title="Walk through the town at eye height: W A S D or the arrow keys to walk, drag to look round, Shift to run, Esc to leave">Walk in the city</button>
+    </div>
+    <div id="tabButtons">
+      <button data-tab="build" class="active">Build</button>
+      <button data-tab="ground">Ground</button>
+      <button data-tab="settle">Settle</button>
+      <button data-tab="city">City</button>
+      <button data-tab="data">Data</button>
+    </div>
+
+    <div class="tabPane shown" data-tab="build">
+      <div class="sectionTitle">BUILD WITH</div>
+      <div class="buttonColumn">
+        <button class="tierButton active" data-tier="1">Classical <kbd>1</kbd><small>temples, towers, arcades, minced from models</small></button>
+        <button class="tierButton" data-tier="2">Vernacular <kbd>2</kbd><small>houses that grow together</small></button>
+        <button class="tierButton" data-tier="3">Temporary <kbd>3</kbd><small>stalls, and shabby houses of two levels</small></button>
+      </div>
+      <div class="hint" style="margin-top: 8px;">Click to raise a point, right click to take a block away. Drag to turn the view.</div>
+      <div class="sectionTitle">TOWN</div>
+      <div class="buttonRow">
+        <button id="forumButton" title="The town this ground starts with">Start town</button>
+        <button id="randomButton" title="A random town">Random</button>
+      </div>
+      <div class="buttonRow">
+        <button id="volumeButton" title="Show the bare volume the town is made from">Volume</button>
+        <button id="clearButton">Clear</button>
+      </div>
+      <div class="sectionTitle">MONUMENTS FOUND</div>
+      <div id="monumentList" class="hint"></div>
+    </div>
+
+    <div class="tabPane" data-tab="ground">
+      <div class="sectionTitle">GROUND</div>
+      <div class="buttonRow">
+        <button id="squareMapButton" title="A square grid of points">Square</button>
+        <button id="irregularMapButton" title="An irregular grid of quads: three to six quads meet at a point">Irregular</button>
+      </div>
+      <div class="buttonColumn">
+        <button id="largeIrregularMapButton" title="The irregular grid, large and empty: a ground to settle (it takes a few seconds to make)">Large irregular, to settle</button>
+      </div>
+      <div class="sectionTitle">SIZE</div>
+      <div class="parameterRow">
+        <label for="squareSizeList">Square: points along a side</label>
+        <select id="squareSizeList">
+          <option value="30" selected>30</option><option value="40">40</option><option value="50">50</option><option value="60">60</option><option value="80">80</option><option value="100">100</option><option value="120">120</option>
+        </select>
+      </div>
+      <div class="parameterRow">
+        <label for="irregularSizeList">Large irregular: rings</label>
+        <select id="irregularSizeList">
+          <option value="8" selected>8</option><option value="11">11</option><option value="14">14</option><option value="18">18</option><option value="22">22</option><option value="26">26</option>
+        </select>
+      </div>
+      <div class="hint">A point is 4 m. A larger ground takes longer to make, to settle and to rebuild; choosing a size makes the ground anew.</div>
+    </div>
+
+    <div class="tabPane" data-tab="settle">
+      <div class="sectionTitle">SETTLEMENT</div>
+      <div class="buttonRow">
+        <button id="settleButton" title="Let people settle the town by themselves, or stop them">Settle</button>
+        <button id="newSettlementButton" title="Empty the ground and let a new town settle, with the parameters below">New</button>
+      </div>
+      <div id="settlementStatus" class="hint">People arrive, travel, grow rich and rebuild. Where they travel a lot is street.</div>
+      <div class="sectionTitle">HOUSEHOLDS: PARAMETERS</div>
+      <div id="householdParameters"></div>
+      <div class="hint">They hold for the next settlement started with New.</div>
+      <div class="sectionTitle">SAVED RUNS</div>
+      <div class="buttonColumn">
+        <select id="savedRunList" style="width: 100%; padding: 6px; font: inherit;"></select>
+        <button id="loadSavedRunButton" title="Show the town of a saved run as it stood at its end, in space, with its data">Load run</button>
+      </div>
+      <div id="savedRunHint" class="hint">Looking for saved runs ...</div>
+    </div>
+
+    <div class="tabPane" data-tab="city">
+      <div class="sectionTitle">PUBLIC BUILDINGS: HOUSEHOLDS NEEDED</div>
+      <div id="publicBuildingBars"></div>
+      <div class="sectionTitle">TAX, WATER, WALL: PARAMETERS</div>
+      <div id="cityParameters"></div>
+      <div class="hint">They hold for the next settlement started with New (Settle tab).</div>
+    </div>
+
+    <div class="tabPane" data-tab="data">
+      <div class="sectionTitle">DATA LAYER</div>
+      <div id="dataLayerButtons">
+        <div class="buttonRow">
+          <button data-layer="traffic" class="active" title="Recent traffic on free ground">Traffic</button>
+          <button data-layer="streets" title="Streets and busy streets, and the ground kept open before monuments">Streets</button>
+        </div>
+        <div class="buttonRow">
+          <button data-layer="owners" title="The parcel of every household">Owners</button>
+          <button data-layer="stage" title="How far every household has built">Stage</button>
+        </div>
+        <div class="buttonRow">
+          <button data-layer="money" title="What every household holds">Money</button>
+          <button data-layer="worth" title="What the ground is worth, as parcel or as road">Worth</button>
+        </div>
+        <div class="buttonRow">
+          <button data-layer="pressure" title="How near a building is to being broken through by traffic">Pressure</button>
+          <button data-layer="works" title="Walls, gates, the aqueduct and the fountains; the ground within the walls">Works</button>
+        </div>
+        <div class="buttonRow">
+          <button data-layer="none" title="No data on the ground">None</button>
+        </div>
+      </div>
+      <div id="dataLayerLegend" class="hint">Recent traffic on free ground; the large patches count as road.</div>
+      <div class="sectionTitle">THE CITY IN NUMBERS</div>
+      <canvas id="historyChart" width="660" height="260" style="width: 100%; height: 130px; background: #ffffff; border: 1px solid #d8d0bf; border-radius: 4px;"></canvas>
+      <div id="historyLegend" class="hint">Households over the days: in huts, in houses, classical.</div>
+      <table id="cityStatistics"></table>
+      <div class="sectionTitle">THE RICHEST HOUSEHOLDS</div>
+      <table id="richestHouseholds"></table>
+      <div class="sectionTitle">CHRONICLE OF THE CITY</div>
+      <div id="cityChronicle" class="hint"></div>
+    </div>
+  </div>
+  <div id="catalogue"><button id="catalogueWidthButton" type="button">Narrow</button></div>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+{
+  "tileSizePixels": 32,
+  "tiles": {
+    "stone": {
+      "column": 0,
+      "row": 0,
+      "metresPerRepeat": 1.6
+    },
+    "stoneShade": {
+      "column": 1,
+      "row": 0,
+      "metresPerRepeat": 1.6
+    },
+    "tile": {
+      "column": 2,
+      "row": 0,
+      "metresPerRepeat": 1.6
+    },
+    "bronze": {
+      "column": 3,
+      "row": 0,
+      "metresPerRepeat": 1.0
+    },
+    "plasterOchre": {
+      "column": 4,
+      "row": 0,
+      "metresPerRepeat": 3.2
+    },
+    "plasterRose": {
+      "column": 5,
+      "row": 0,
+      "metresPerRepeat": 3.2
+    },
+    "plasterCream": {
+      "column": 6,
+      "row": 0,
+      "metresPerRepeat": 3.2
+    },
+    "plasterSienna": {
+      "column": 7,
+      "row": 0,
+      "metresPerRepeat": 3.2
+    },
+    "interior": {
+      "column": 0,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "person": {
+      "column": 1,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "timber": {
+      "column": 2,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "plank": {
+      "column": 3,
+      "row": 1,
+      "metresPerRepeat": 1.2
+    },
+    "thatch": {
+      "column": 4,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "canvasMadder": {
+      "column": 5,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "canvasHemp": {
+      "column": 6,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "canvasLinen": {
+      "column": 7,
+      "row": 1,
+      "metresPerRepeat": 1.0
+    },
+    "water": {
+      "column": 0,
+      "row": 2,
+      "metresPerRepeat": 2.0
+    },
+    "volumeClassical": {
+      "column": 1,
+      "row": 2,
+      "metresPerRepeat": 1.0
+    },
+    "volumeVernacular": {
+      "column": 2,
+      "row": 2,
+      "metresPerRepeat": 1.0
+    },
+    "volumeTemporary": {
+      "column": 3,
+      "row": 2,
+      "metresPerRepeat": 1.0
+    },
+    "brick": {
+      "column": 4,
+      "row": 2,
+      "metresPerRepeat": 0.96
+    },
+    "brickPale": {
+      "column": 5,
+      "row": 2,
+      "metresPerRepeat": 0.96
+    },
+    "cobble": {
+      "column": 6,
+      "row": 2,
+      "metresPerRepeat": 1.6
+    },
+    "paving": {
+      "column": 7,
+      "row": 2,
+      "metresPerRepeat": 2.4
+    },
+    "roughStone": {
+      "column": 0,
+      "row": 3,
+      "metresPerRepeat": 1.6
+    },
+    "grass": {
+      "column": 1,
+      "row": 3,
+      "metresPerRepeat": 2.0
+    },
+    "leaf": {
+      "column": 2,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "leafPale": {
+      "column": 3,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "toga": {
+      "column": 4,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "dressSaffron": {
+      "column": 5,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "dressMadder": {
+      "column": 6,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "dressSage": {
+      "column": 7,
+      "row": 3,
+      "metresPerRepeat": 1.0
+    },
+    "dressBlueGrey": {
+      "column": 0,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    },
+    "dressMauve": {
+      "column": 1,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    },
+    "skin": {
+      "column": 2,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    },
+    "hair": {
+      "column": 3,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    },
+    "window": {
+      "column": 4,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    },
+    "windowOpen": {
+      "column": 5,
+      "row": 4,
+      "metresPerRepeat": 1.0
+    }
+  }
+}
