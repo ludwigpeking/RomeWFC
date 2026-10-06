@@ -126,6 +126,8 @@ def judge(run):
         'variety of kinds': last['kindEntropy'],
         'spread of levels': last['spreadOfLevels'],
         'worth gini': last['worthGini'],
+        'height~land': last.get('heightFollowsLand', ''),
+        'levels dear / cheap land': str(last.get('levelsOnDearLand', '')) + ' / ' + str(last.get('levelsOnCheapLand', '')),
     }
 
 
