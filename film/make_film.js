@@ -16,13 +16,14 @@ const HEIGHT = 1080;
 const FRAMES_PER_SECOND = 30;
 const FILM_FOLDER = __dirname;
 const FOOTAGE_FOLDER = path.join(FILM_FOLDER, "footage_raw");
-const PAUSE_BETWEEN_LINES = 0.35;
-const PAUSE_BETWEEN_SCENES = 1.1;
+const PAUSE_BETWEEN_LINES = 0.55;
+const PAUSE_BETWEEN_SCENES = 2.6;
+const ENDING_SECONDS = 20; // after the last line: the irregular town, then both towns side by side
 const TITLE_SECONDS = 4.0;
 const CREDIT_SECONDS = 4.5;
 
 // the film's own names (the title is provisional until the author gives one)
-const FILM_TITLE = ["算法生成城市", "先有一个房地产市场"];
+const FILM_TITLE = ["算法生成城市", "房地产市场"];
 const FILM_SUBTITLE = "A real estate market, simulated from the bottom up";
 const FILM_BYLINE = "Richard Qian Li 陈腐粉碎机";
 
@@ -61,7 +62,7 @@ const scenes = []; // { name, title, start, end, lines: [{ start, end, text, nam
         scene.lines.push({ name: line.name, text: line.zh, start: time, end: time + line.duration });
         time += line.duration + PAUSE_BETWEEN_LINES;
     });
-    scenes[scenes.length - 1].end = time + 1.0;
+    scenes[scenes.length - 1].end = time + ENDING_SECONDS;
 }());
 const FILM_SECONDS = scenes[scenes.length - 1].end + CREDIT_SECONDS;
 
@@ -284,237 +285,170 @@ function subtitle(context, time) {
 }
 
 // ---------------------------------------------------------------------------
-// The scenes. G: the town growing, the camera going round; S: the same town, the camera still.
+// The scenes. The footage plays at its own speed (a frame of footage for a frame of film) from
+// the frame a scene begins it at, unless a scene says otherwise.
 // ---------------------------------------------------------------------------
-const G = "squareGrowth";
-const S = "squareGrowthStill";
+const SQUARE_GROWTH = "squareGrowth";
+const HEX_GROWTH = "hexGrowth";
+const SQUARE_BEAUTY = "squareBeauty";
+const HEX_BEAUTY = "hexBeauty";
 
+// the progress through a shot at a time: from a first frame on, at a speed (1: as it was filmed)
+function playing(shotName, scene, time, firstFrame, speed) {
+    return clamp01((firstFrame + (time - scene.start) * FRAMES_PER_SECOND * (speed || 1)) / (frameCount(shotName) - 1));
+}
 // one layer of a shot fading into another at a time
-async function layers(context, shotName, progress, time, cuts) {
-    // cuts: [{ layer, at }] in the order of their times; each fades in over the one before
+async function layers(context, shotName, progress, time, cuts, box) {
     for (let index = 0; index < cuts.length; index++) {
-        const alpha = index === 0 ? 1 : ease(ramp(time, cuts[index].at, 0.9));
+        const alpha = index === 0 ? 1 : ease(ramp(time, cuts[index].at, 1.0));
         if (alpha > 0) {
-            drawImageCover(context, await footage(shotName, cuts[index].layer, progress), alpha);
+            drawImageCover(context, await footage(shotName, cuts[index].layer, progress), alpha, box);
         }
     }
 }
-function sceneProgress(scene, time) {
-    return clamp01((time - scene.start) / (scene.end - scene.start));
+// the name of the layer that is shown, in the corner
+function layerLabel(context, label, alpha) {
+    if (label) {
+        text(context, label, WIDTH - 96, 120, 44, INK, { bold: true, align: "right", alpha: alpha === undefined ? 1 : alpha });
+    }
+}
+function dayCounter(context, shotName, progress) {
+    const frame = numbersAt(shotName, progress);
+    if (frame && frame.day !== undefined) {
+        text(context, "第 " + frame.day.toLocaleString("en-US") + " 天 · " + frame.statistics.households.toLocaleString("en-US") + " 户", WIDTH - 96, HEIGHT - 190, 30, INK, { align: "right", bold: true });
+    }
+}
+// a relation in words: its left side, a sign, its right side
+function relation(context, left, sign, right, y, time, startTime) {
+    const alpha = ease(ramp(time, startTime, 0.7));
+    context.save();
+    context.font = "46px FilmBold";
+    const leftWidth = context.measureText(left).width;
+    context.restore();
+    text(context, left, 96, y, 46, ACCENT, { bold: true, alpha: alpha });
+    text(context, sign, 96 + leftWidth + 22, y, 46, SOFT_INK, { bold: true, alpha: alpha });
+    text(context, right, 96 + leftWidth + 80, y, 46, INK, { bold: true, alpha: ease(ramp(time, startTime + 0.5, 0.7)) });
 }
 
 const SCENE_DRAWERS = {
-    // the opening: the town grows; the buildings fade and the value of the locations shows
+    // the opening: the grown town from near, the people in its streets
     s00: async function (context, scene, time) {
-        const progress = mix(0.0, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "location", at: lineStart(scene, 4) }, { layer: "none", at: lineStart(scene, 6) }]);
-        veilFoot(context, 1);
-        const frame = numbersAt(G, progress);
-        if (frame) {
-            counter(context, frame.day, "天", WIDTH - 420, 110, 0.95);
-            counter(context, frame.statistics.households, "户人家", WIDTH - 230, 110, 0.95);
-        }
+        const progress = playing(SQUARE_BEAUTY, scene, time, 0, 1);
+        drawImageCover(context, await footage(SQUARE_BEAUTY, "none", progress), 1);
     },
     // location: traffic, security, and their product
     s01: async function (context, scene, time) {
-        const progress = mix(0.25, 0.95, sceneProgress(scene, time));
-        const threeAt = lineStart(scene, 6);
-        if (time < threeAt + 0.9) {
-            await layers(context, S, progress, time, [{ layer: "none", at: 0 }, { layer: "traffic", at: lineStart(scene, 2) - 0.4 }, { layer: "security", at: lineStart(scene, 5) - 0.4 }]);
-        }
-        const threeAlpha = ease(ramp(time, threeAt, 0.9));
+        const progress = playing(SQUARE_GROWTH, scene, time, 60, 1);
+        const threeAt = lineStart(scene, 5);
+        await layers(context, SQUARE_GROWTH, progress, time, [{ layer: "none", at: 0 }, { layer: "journeys", at: lineStart(scene, 2) - 0.3 }, { layer: "security", at: lineStart(scene, 4) - 0.3 }]);
+        const threeAlpha = ease(ramp(time, threeAt, 1.0));
         if (threeAlpha > 0) {
             context.fillStyle = "rgba(18, 17, 16, " + threeAlpha + ")";
             context.fillRect(0, 0, WIDTH, HEIGHT);
             const panelWidth = 560;
-            const panelHeight = 560;
+            const panelHeight = 520;
             const gap = 70;
             const left = (WIDTH - 3 * panelWidth - 2 * gap) / 2;
-            const names = [["traffic", "交通"], ["security", "安全"], ["location", "位置价值"]];
+            const names = [["journeys", "交通"], ["security", "安全"], ["location", "位置价值"]];
             for (let index = 0; index < 3; index++) {
-                const box = { x: left + index * (panelWidth + gap), y: 190, width: panelWidth, height: panelHeight };
-                drawImageCover(context, await footage(S, names[index][0], progress), threeAlpha * ease(ramp(time, threeAt + index * 0.5, 0.6)), box);
-                text(context, names[index][1], box.x + panelWidth / 2, box.y + panelHeight + 60, 40, index === 2 ? ACCENT : INK, { bold: true, align: "center", alpha: threeAlpha });
+                const box = { x: left + index * (panelWidth + gap), y: 200, width: panelWidth, height: panelHeight };
+                drawImageCover(context, await footage(SQUARE_GROWTH, names[index][0], progress), threeAlpha * ease(ramp(time, threeAt + index * 0.6, 0.7)), box);
+                text(context, names[index][1], box.x + panelWidth / 2, box.y + panelHeight + 70, 46, index === 2 ? ACCENT : INK, { bold: true, align: "center", alpha: threeAlpha });
                 if (index < 2) {
-                    text(context, index === 0 ? "×" : "=", box.x + panelWidth + gap / 2, box.y + panelHeight / 2 + 20, 60, SOFT_INK, { bold: true, align: "center", alpha: threeAlpha });
+                    text(context, index === 0 ? "×" : "=", box.x + panelWidth + gap / 2, box.y + panelHeight / 2 + 22, 64, SOFT_INK, { bold: true, align: "center", alpha: threeAlpha });
                 }
             }
         } else {
-            veilLeft(context, 0.9);
-            const first = time < lineStart(scene, 5) - 0.4;
-            text(context, first ? "交通值" : "安全值", 96, 250, 64, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 2) - 0.2, 0.6)) });
-            if (first) {
-                text(context, "出行途经的点：+ 权重", 96, 320, 30, INK, { alpha: ease(ramp(time, lineStart(scene, 2) + 1.0, 0.6)) });
-                text(context, "紧邻的点：+ 权重的一半", 96, 366, 30, INK, { alpha: ease(ramp(time, lineStart(scene, 2) + 2.2, 0.6)) });
-                text(context, "一段路的通行成本 = 1/(2n) + 0.5", 96, 450, 30, INK, { mono: false, alpha: ease(ramp(time, lineStart(scene, 3), 0.6)) });
-                text(context, "n：这段路被走过的次数；成本最低降到一半", 96, 494, 26, SOFT_INK, { alpha: ease(ramp(time, lineStart(scene, 3) + 0.8, 0.6)) });
-            } else {
-                text(context, "一户人家：周围的安全值增加", 96, 320, 30, INK, { alpha: ease(ramp(time, lineStart(scene, 5) + 0.6, 0.6)) });
-                text(context, "公共建筑：增加得更多", 96, 366, 30, INK, { alpha: ease(ramp(time, lineStart(scene, 5) + 2.6, 0.6)) });
-            }
+            layerLabel(context, time < lineStart(scene, 2) - 0.3 ? "" : time < lineStart(scene, 4) - 0.3 ? "交通" : "安全");
+            dayCounter(context, SQUARE_GROWTH, progress);
         }
         chapterTitle(context, scene, time);
     },
-    // the two values
+    // the two values, and land price as what is left
     s02: async function (context, scene, time) {
-        const progress = mix(0.55, 0.95, sceneProgress(scene, time));
-        await layers(context, S, progress, time, [{ layer: "none", at: 0 }, { layer: "height", at: lineStart(scene, 2) + 1.5 }, { layer: "worth", at: lineStart(scene, 3) }]);
+        const progress = playing(SQUARE_GROWTH, scene, time, 480, 0.9);
+        await layers(context, SQUARE_GROWTH, progress, time, [{ layer: "none", at: 0 }, { layer: "location", at: lineStart(scene, 3) }, { layer: "landPrice", at: lineStart(scene, 4) }]);
         veilLeft(context, 1);
-        formula(context, ["建筑价值", "=", "Σ 面积", "×", "单位造价", "×", "楼层与档次的加价"], 96, 300, 38, time, lineStart(scene, 2) + 1.0);
-        formula(context, ["房产价值", "=", "Σ 面积", "×", "交通", "×", "安全", "×", "效用"], 96, 420, 38, time, lineStart(scene, 3) + 0.6);
-        text(context, "效用：楼层越高越低；不临街的地块更低", 96, 480, 28, SOFT_INK, { alpha: ease(ramp(time, lineStart(scene, 5), 0.6)) });
-        // the floors of one house: cost rising, utility falling (the numbers of the model)
-        const floorsAlpha = ease(ramp(time, lineStart(scene, 2) + 2.2, 0.8));
-        if (floorsAlpha > 0) {
-            const left = 96;
-            const foot = 900;
-            for (let level = 0; level < 6; level++) {
-                const costWidth = 150 * Math.pow(1.25, level) / Math.pow(1.25, 5);
-                const utilityWidth = 150 * Math.pow(0.8, level);
-                const y = foot - level * 46;
-                const rowAlpha = floorsAlpha * ease(ramp(time, lineStart(scene, 2) + 2.2 + level * 0.18, 0.4));
-                context.save();
-                context.globalAlpha = rowAlpha;
-                context.fillStyle = "#e2725b";
-                context.fillRect(left + 90, y - 30, costWidth, 30);
-                context.fillStyle = ACCENT;
-                context.globalAlpha = rowAlpha * ease(ramp(time, lineStart(scene, 5), 0.6));
-                context.fillRect(left + 290, y - 30, utilityWidth, 30);
-                context.restore();
-                text(context, (level + 1) + " 层", left, y - 6, 24, INK, { alpha: rowAlpha });
-            }
-            text(context, "造价", left + 90, foot + 34, 24, "#e2725b", { alpha: floorsAlpha });
-            text(context, "效用", left + 290, foot + 34, 24, ACCENT, { alpha: floorsAlpha * ease(ramp(time, lineStart(scene, 5), 0.6)) });
-        }
+        relation(context, "建筑价值", "=", "建造的成本", 330, time, lineStart(scene, 2) + 0.4);
+        text(context, "面积 · 层数 · 规格", 96, 384, 30, SOFT_INK, { alpha: ease(ramp(time, lineStart(scene, 2) + 1.4, 0.7)) });
+        relation(context, "房产价值", "=", "位置价值 × 效用", 500, time, lineStart(scene, 3) + 0.4);
+        text(context, "效用：随楼层升高而降低；不临街的更低", 96, 554, 30, SOFT_INK, { alpha: ease(ramp(time, lineStart(scene, 3) + 2.4, 0.7)) });
+        relation(context, "地价", "=", "房产价值 − 建筑价值", 670, time, lineStart(scene, 4) + 0.4);
+        layerLabel(context, time < lineStart(scene, 3) ? "" : time < lineStart(scene, 4) ? "位置价值" : "地价", ease(ramp(time, lineStart(scene, 3), 0.8)));
+        dayCounter(context, SQUARE_GROWTH, progress);
         chapterTitle(context, scene, time);
     },
-    // land price as the residual
+    // the household's books, and what it does with its money
     s03: async function (context, scene, time) {
-        const progress = mix(0.6, 1.0, sceneProgress(scene, time));
-        await layers(context, S, progress, time, [{ layer: "worth", at: 0 }, { layer: "landPrice", at: lineStart(scene, 1) + 1.0 }]);
-        veilLeft(context, 1);
-        formula(context, ["地价", "=", "房产价值", "−", "建筑价值"], 96, 300, 44, time, lineStart(scene, 1) + 0.3);
-        // the same building on two locations: the building part alike, the land part not
-        const barsAlpha = ease(ramp(time, lineStart(scene, 2), 0.7));
-        stackedBars(context, { x: 96, y: 420, width: 620, height: 420 }, [
-            { label: "人流多的位置", segments: [{ value: 3, colour: "#8fc1d4", label: "建筑" }, { value: 7, colour: ACCENT, label: "地" }] },
-            { label: "人流少的位置", segments: [{ value: 3, colour: "#8fc1d4", label: "建筑" }, { value: 1.2, colour: ACCENT, label: "地" }] },
-        ], barsAlpha, ease(ramp(time, lineStart(scene, 2), 1.4)));
-        text(context, "示意：同一栋建筑，两个位置", 96, 920, 24, SOFT_INK, { alpha: barsAlpha });
-        chapterTitle(context, scene, time);
-    },
-    // a household's books
-    s04: async function (context, scene, time) {
-        const progress = mix(0.45, 0.85, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "rent", at: lineStart(scene, 2) }]);
-        veilLeft(context, 1);
-        formula(context, ["年租金", "=", "房产价值", "×", "7%"], 96, 300, 44, time, lineStart(scene, 2) + 0.3);
-        const outAlpha = ease(ramp(time, lineStart(scene, 3), 0.6));
-        text(context, "− 税：按房产价值", 96, 390, 34, INK, { alpha: outAlpha });
-        text(context, "− 维护费：按建筑价值，古典建筑费率更高", 96, 440, 34, INK, { alpha: ease(ramp(time, lineStart(scene, 3) + 2.4, 0.6)) });
-        text(context, "+ 农户：农田的收成", 96, 490, 34, INK, { alpha: ease(ramp(time, lineStart(scene, 4), 0.6)) });
-        const frame = numbersAt(G, progress);
-        if (frame) {
-            const numbersAlpha = ease(ramp(time, lineStart(scene, 2) + 1.5, 0.8));
-            counter(context, frame.statistics.worthOfAllProperty, "全城房产价值", 96, 680, numbersAlpha);
-            counter(context, frame.statistics.rentOfAllEachDay * 360, "全城一年的租金与农田收成", 96, 810, numbersAlpha);
-        }
-        chapterTitle(context, scene, time);
-    },
-    // where the money goes
-    s05: async function (context, scene, time) {
-        const progress = mix(0.2, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "height", at: lineStart(scene, 4) }, { layer: "location", at: lineStart(scene, 5) },
-            { layer: "height", at: lineStart(scene, 5) + 3.2 }, { layer: "owners", at: lineStart(scene, 7) }]);
+        const progress = playing(SQUARE_GROWTH, scene, time, 150, 0.85);
+        await layers(context, SQUARE_GROWTH, progress, time, [{ layer: "none", at: 0 }, { layer: "owners", at: lineStart(scene, 2) }, { layer: "none", at: lineStart(scene, 3) },
+            { layer: "location", at: lineStart(scene, 5) }, { layer: "height", at: lineStart(scene, 6) - 0.3 }, { layer: "location", at: lineStart(scene, 6) + 2.6 },
+            { layer: "height", at: lineStart(scene, 7) - 0.4 }, { layer: "none", at: lineStart(scene, 7) + 4.5 }]);
         veilLeft(context, 0.85);
-        const kinds = [["buildUp", "加层"], ["rebuildAsHouse", "翻建为住宅"], ["buyLandAndBuild", "买地新建"], ["acquire", "买下别人的房产"], ["classicalGroundFloor", "底层改古典"], ["garden", "花园"]];
-        lineChart(context, { x: 120, y: 250, width: 640, height: 380 }, G, progress, kinds.map(function (kind) {
-            return { label: kind[1], valueOf: function (frame) { return investmentsAt(frame)[kind[0]] || 0; } };
-        }), "投资的累计次数", ease(ramp(time, lineStart(scene, 2), 0.8)));
-        text(context, "选：租金增加 ÷ 投入 最高的一项", 96, 760, 34, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 3), 0.6)) });
-        text(context, "每层造价更高，效用更低；住宅最多六层", 96, 812, 28, INK, { alpha: ease(ramp(time, lineStart(scene, 4), 0.6)) });
-        text(context, "买别人的房产：溢价 30% + 交易税", 96, 858, 28, INK, { alpha: ease(ramp(time, lineStart(scene, 7), 0.6)) });
-        const layerName = time < lineStart(scene, 4) ? "" : time < lineStart(scene, 5) ? "楼的高度" : time < lineStart(scene, 5) + 3.2 ? "位置价值" : time < lineStart(scene, 7) ? "楼的高度" : "产权";
-        text(context, layerName, WIDTH - 96, 120, 40, INK, { bold: true, align: "right" });
-        chapterTitle(context, scene, time);
-    },
-    // classical is hard
-    s06: async function (context, scene, time) {
-        const progress = mix(0.7, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }]);
-        veilLeft(context, 0.9);
-        const frame = numbersAt(G, progress);
-        if (frame) {
-            counter(context, frame.statistics.houseBlocksWithClassicalFloors, "有古典楼层的住宅地块", 96, 330, ease(ramp(time, lineStart(scene, 1) + 1.0, 0.6)));
-            counter(context, frame.statistics.houseBlocks, "普通住宅地块", 96, 460, ease(ramp(time, lineStart(scene, 1) + 1.4, 0.6)));
-            counter(context, frame.statistics.classicalBlocks, "整栋古典的地块", 96, 590, ease(ramp(time, lineStart(scene, 4), 0.6)));
-        }
-        text(context, "价值的提高：只对头一两处有效", 96, 740, 32, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 2), 0.6)) });
-        text(context, "造价和维护费：每一处都要付", 96, 790, 32, INK, { alpha: ease(ramp(time, lineStart(scene, 3), 0.6)) });
-        chapterTitle(context, scene, time);
-    },
-    // gardens, streets, demolition
-    s07: async function (context, scene, time) {
-        const progress = mix(0.4, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "traffic", at: lineStart(scene, 3) }, { layer: "pressure", at: lineStart(scene, 5) }]);
-        veilLeft(context, 0.9);
-        const frame = numbersAt(G, progress);
-        text(context, "花园：相邻房产的租金 + 15%", 96, 300, 36, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 2), 0.6)) * (1 - ease(ramp(time, lineStart(scene, 3), 0.6))) });
-        text(context, "买街道：价格 + 两倍价格的溢价", 96, 300, 36, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 3), 0.6)) * (1 - ease(ramp(time, lineStart(scene, 5), 0.6))) });
-        text(context, "穿过建筑的成本很高；拆除能明显降低出行成本时，城市拆除并赔偿", 96, 300, 30, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 5), 0.6)) });
-        if (frame) {
-            counter(context, frame.statistics.gardenPoints, "花园地块", 96, 470, ease(ramp(time, lineStart(scene, 1) + 0.8, 0.6)));
-            counter(context, frame.statistics.buildingsBrokenThrough, "为打通道路拆除的建筑", 96, 600, ease(ramp(time, lineStart(scene, 4), 0.6)));
-        }
-        const layerName = time < lineStart(scene, 3) ? "" : time < lineStart(scene, 5) ? "人走过的路" : "建筑受到的拆除压力";
-        text(context, layerName, WIDTH - 96, 120, 40, INK, { bold: true, align: "right" });
-        chapterTitle(context, scene, time);
-    },
-    // the home
-    s08: async function (context, scene, time) {
-        const progress = mix(0.5, 1.0, sceneProgress(scene, time));
-        await layers(context, S, progress, time, [{ layer: "none", at: 0 }, { layer: "owners", at: lineStart(scene, 1) + 0.6 }]);
-        veilLeft(context, 0.9);
-        text(context, "家 = 名下价值最高的一处房产", 96, 300, 40, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 1) + 0.3, 0.6)) });
-        text(context, "房产越分散，管理的损耗越大", 96, 370, 32, INK, { alpha: ease(ramp(time, lineStart(scene, 2), 0.6)) });
-        text(context, "一种颜色 = 一户人家的地产", WIDTH - 96, 120, 34, INK, { bold: true, align: "right", alpha: ease(ramp(time, lineStart(scene, 1) + 1.2, 0.6)) });
+        const booksAlpha = ease(ramp(time, lineStart(scene, 2), 0.7)) * (1 - ease(ramp(time, lineStart(scene, 3) - 0.3, 0.6)));
+        text(context, "+ 租金", 96, 330, 46, ACCENT, { bold: true, alpha: booksAlpha });
+        text(context, "− 税", 96, 410, 46, INK, { bold: true, alpha: booksAlpha * ease(ramp(time, lineStart(scene, 2) + 2.2, 0.6)) });
+        text(context, "− 维护", 96, 490, 46, INK, { bold: true, alpha: booksAlpha * ease(ramp(time, lineStart(scene, 2) + 3.0, 0.6)) });
+        const chartAlpha = ease(ramp(time, lineStart(scene, 3), 0.8)) * (1 - ease(ramp(time, lineStart(scene, 5) - 0.4, 0.8)));
+        // what a household may do with its savings, one after another
+        ["加一层", "翻建成更高的规格", "买一块地", "买下别人的房产"].forEach(function (choice, index) {
+            text(context, choice, 96, 330 + index * 80, 46, INK, { bold: true, alpha: chartAlpha * ease(ramp(time, lineStart(scene, 3) + 1.2 + index * 1.3, 0.6)) });
+        });
+        text(context, "比较：多得的租金 ÷ 投入", 96, 700, 46, ACCENT, { bold: true, alpha: ease(ramp(time, lineStart(scene, 4), 0.7)) * (1 - ease(ramp(time, lineStart(scene, 5) - 0.4, 0.8))) });
+        const label = time < lineStart(scene, 2) ? "" : time < lineStart(scene, 3) ? "产权" : time < lineStart(scene, 5) ? "" :
+            time < lineStart(scene, 6) - 0.3 ? "位置价值" : time < lineStart(scene, 6) + 2.6 ? "楼的高度" : time < lineStart(scene, 7) - 0.4 ? "位置价值" : time < lineStart(scene, 7) + 4.5 ? "楼的高度" : "";
+        layerLabel(context, label);
+        dayCounter(context, SQUARE_GROWTH, progress);
         chapterTitle(context, scene, time);
     },
     // the city
-    s09: async function (context, scene, time) {
-        const progress = mix(0.15, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "works", at: lineStart(scene, 3) }, { layer: "security", at: lineStart(scene, 4) }]);
-        veilLeft(context, 0.9);
-        lineChart(context, { x: 120, y: 260, width: 640, height: 340 }, G, progress, [
-            { label: "卖地", valueOf: function (frame) { return frame.statistics.landSoldByTheCity; } },
-            { label: "卖地 + 税", valueOf: function (frame) { return frame.statistics.taxCollected; } },
-            { label: "支出", valueOf: function (frame) { return frame.statistics.moneySpentByTheCity; } },
-        ], "城市的账（累计）", ease(ramp(time, lineStart(scene, 1) + 0.8, 0.8)));
+    s04: async function (context, scene, time) {
+        const progress = playing(SQUARE_GROWTH, scene, time, 760, 1);
+        drawImageCover(context, await footage(SQUARE_GROWTH, "none", progress), 1);
+        veilLeft(context, 0.75);
         // what the city built, as it happens
-        const frames = frameData(G);
-        const lastFrame = frameNumberAt(G, progress);
+        const frames = frameData(SQUARE_GROWTH);
+        const lastFrame = frameNumberAt(SQUARE_GROWTH, progress);
+        const names = { temple: "神庙", cityArch: "凯旋门", basilica: "巴西利卡", theatre: "剧场", amphitheatre: "斗兽场", pantheon: "万神殿", circus: "竞技场", wall: "城墙" };
         const events = [];
         for (let frameIndex = 0; frameIndex < lastFrame; frameIndex++) {
             (frames[frameIndex].events || []).forEach(function (event) {
                 const kind = event.text.split(" ")[0];
-                const names = { temple: "神庙", cityArch: "凯旋门", basilica: "巴西利卡", theatre: "剧场", amphitheatre: "斗兽场", pantheon: "万神殿", circus: "竞技场", wall: "城墙", fountain: "喷泉" };
-                if (names[kind] && kind !== "fountain") {
-                    events.push("第 " + event.day + " 天  " + names[kind]);
+                if (names[kind]) {
+                    events.push({ line: "第 " + event.day + " 天　" + names[kind], frame: frameIndex });
                 }
             });
         }
-        events.slice(-7).forEach(function (line, index) {
-            text(context, line, 120, 730 + index * 36, 26, INK, { alpha: ease(ramp(time, lineStart(scene, 3), 0.6)) });
+        events.slice(-8).forEach(function (event, index) {
+            text(context, event.line, 96, 330 + index * 52, 34, INK, { alpha: clamp01((lastFrame - event.frame) / 20) });
         });
+        dayCounter(context, SQUARE_GROWTH, progress);
         chapterTitle(context, scene, time);
     },
-    // the result
-    s10: async function (context, scene, time) {
-        const progress = mix(0.9, 1.0, sceneProgress(scene, time));
-        await layers(context, G, progress, time, [{ layer: "none", at: 0 }, { layer: "location", at: lineStart(scene, 2) - 0.3 }, { layer: "height", at: lineStart(scene, 2) + 2.6 }, { layer: "none", at: lineStart(scene, 3) }]);
-        veilFoot(context, 1);
-        const layerName = time < lineStart(scene, 2) - 0.3 ? "" : time < lineStart(scene, 2) + 2.6 ? "位置价值" : time < lineStart(scene, 3) ? "楼的高度" : "";
-        text(context, layerName, WIDTH - 96, 120, 40, INK, { bold: true, align: "right" });
+    // the same rules on the other ground; then both towns
+    s05: async function (context, scene, time) {
+        const linesEnd = scene.lines[scene.lines.length - 1].end;
+        const bothAt = scene.end - 9;
+        if (time < bothAt + 1.0) {
+            // the irregular town grows, faster than it was filmed, so that all of it is seen
+            const secondsOfGrowth = bothAt - scene.start;
+            const progress = clamp01((time - scene.start) / secondsOfGrowth);
+            await layers(context, HEX_GROWTH, progress, time, [{ layer: "none", at: 0 }, { layer: "location", at: lineStart(scene, 1) + 3.0 }, { layer: "height", at: lineStart(scene, 1) + 6.5 }, { layer: "none", at: linesEnd - 3.0 }]);
+            layerLabel(context, time < lineStart(scene, 1) + 3.0 ? "" : time < lineStart(scene, 1) + 6.5 ? "位置价值" : time < linesEnd - 3.0 ? "楼的高度" : "");
+            dayCounter(context, HEX_GROWTH, progress);
+        }
+        const bothAlpha = ease(ramp(time, bothAt, 1.0));
+        if (bothAlpha > 0) {
+            context.fillStyle = "rgba(18, 17, 16, " + bothAlpha + ")";
+            context.fillRect(0, 0, WIDTH, HEIGHT);
+            const seconds = time - bothAt;
+            const squareProgress = clamp01((300 + seconds * FRAMES_PER_SECOND) / (frameCount(SQUARE_BEAUTY) - 1));
+            const hexProgress = clamp01((100 + seconds * FRAMES_PER_SECOND) / (frameCount(HEX_BEAUTY) - 1));
+            drawImageCover(context, await footage(SQUARE_BEAUTY, "none", squareProgress), bothAlpha, { x: 0, y: 0, width: WIDTH / 2 - 4, height: HEIGHT });
+            drawImageCover(context, await footage(HEX_BEAUTY, "none", hexProgress), bothAlpha, { x: WIDTH / 2 + 4, y: 0, width: WIDTH / 2 - 4, height: HEIGHT });
+            text(context, "方格网", 60, 110, 40, INK, { bold: true, alpha: bothAlpha });
+            text(context, "不规则网格", WIDTH / 2 + 64, 110, 40, INK, { bold: true, alpha: bothAlpha });
+        }
         chapterTitle(context, scene, time);
     },
 };
@@ -524,7 +458,7 @@ async function drawFrame(context, time) {
     context.fillRect(0, 0, WIDTH, HEIGHT);
     if (time < TITLE_SECONDS + 0.8) {
         // the title over the grown town
-        drawImageCover(context, await footage(G, "none", 1), 1);
+        drawImageCover(context, await footage(SQUARE_BEAUTY, "none", 0), 1);
         veilLeft(context, 1);
         const fade = 1 - ease(ramp(time, TITLE_SECONDS, 0.8));
         text(context, FILM_TITLE[0], 120, 430, 96, INK, { bold: true, alpha: fade });
@@ -546,10 +480,10 @@ async function drawFrame(context, time) {
         return;
     }
     // the end: the town, and who made it
-    drawImageCover(context, await footage(G, "none", 1), 1);
+    drawImageCover(context, await footage(SQUARE_BEAUTY, "none", 1), 1);
     veilLeft(context, 1);
     text(context, FILM_BYLINE, 120, 520, 54, INK, { bold: true });
-    text(context, "模拟与画面：romeWFC（本片所有画面和数字都来自同一次模拟）", 124, 600, 28, SOFT_INK);
+    text(context, "画面和数字都来自片中的模拟", 124, 600, 28, SOFT_INK);
 }
 
 function subtitleFile() {

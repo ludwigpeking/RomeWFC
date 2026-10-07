@@ -259,6 +259,7 @@ function isADataLayerOverTheTown() {
 // The buildings faint (a data layer is on) or solid: each mesh of the town takes a faint copy of
 // its material, or its own again
 const faintCopyOfMaterial = new Map();
+let faintOpacityOfTheTown = 0.13; // (a film sets it lower: a dense town, faint, still hides the layer)
 function showTheTownFaintOrSolid() {
   if (!townGroup) {
     return;
@@ -275,7 +276,7 @@ function showTheTownFaintOrSolid() {
     if (isFaint && !faintCopyOfMaterial.has(solidMaterial)) {
       const faintMaterial = solidMaterial.clone();
       faintMaterial.transparent = true;
-      faintMaterial.opacity = 0.13;
+      faintMaterial.opacity = faintOpacityOfTheTown;
       faintMaterial.depthWrite = false;
       faintCopyOfMaterial.set(solidMaterial, faintMaterial);
     }
@@ -510,6 +511,7 @@ function rebuildSettledTown() {
 // darker the more they do, and larger where it counts as road); the others are drawn over the
 // town, seen through the buildings, as the patch of ground round each point.
 const DATA_LAYER_LEGENDS = {
+  journeys: 'Traffic as it enters the value of a location: the journeys that crossed a point and passed beside it, the older ones fading. Scaled against the busiest places of the town.',
   traffic: 'The paths people have trodden lately that are not yet streets. Streets are cobbled, busy streets paved.',
   streets: 'Free ground by its grade: street (pale), busy street (red). Blue: ground kept open before a monument.',
   owners: 'One colour for every household: its parcel. Houses grow together only inside a parcel.',
@@ -1450,6 +1452,7 @@ window.rome = {
       events: settlement.city.chronicle.slice(chronicleLengthBefore),
     };
   },
+  filmFaintOpacity: function (opacity) { faintOpacityOfTheTown = opacity; faintCopyOfMaterial.clear(); return true; },
   filmLayer: function (layerName) {
     dataLayerName = layerName;
     showDataLayer();

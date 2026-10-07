@@ -52,7 +52,7 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   classicalUpkeepShareEachYear: 0.05, // ... and of a classical floor
   // ASSUMED (the specification leaves open whether an investment needs a test of its own): it is
   // made only where the rent it adds in a year is at least this share of its cost
-  requiredYieldEachYear: 0.05,
+  requiredYieldEachYear: 0.03,
   levelCostGrowth: 1.25,             // each floor up costs so many times the one below
   upperFloorUtility: 0.8,            // the utility of a floor, for each level it lies above the ground
   interiorUtility: 0.55,             // the utility of a tile that faces no street
@@ -85,7 +85,7 @@ Object.assign(SETTLEMENT_PARAMETER_DEFAULTS, CITY_PARAMETER_DEFAULTS); // what t
 const daysInAYear = 360;
 const floorArea = 16;                    // square metres of one floor of a point (a cell is 4 m wide)
 const UNIT_COST_OF_TIER = {              // what a square metre of floor costs to build on the ground
-  [TIER.temporary]: 12, [TIER.vernacular]: 18, [TIER.classical]: 110,
+  [TIER.temporary]: 12, [TIER.vernacular]: 16, [TIER.classical]: 110,
 };
 const gardenPrice = 3;                   // a square metre of garden laid out
 // ASSUMED (the specification leaves open whether utility depends on the tier): a hut offers less
@@ -1397,6 +1397,10 @@ export class Settlement {
     }
     if (layerName === 'traffic') {
       return household === null && this.recentTraffic[pointIndex] >= 0.5 ? Math.min(1, this.recentTraffic[pointIndex] / (4 * roadRecentTraffic)) : null;
+    }
+    if (layerName === 'journeys') {
+      // the traffic that enters the value of a location
+      return againstTheTown(this.trafficValue[pointIndex], function (otherPoint) { return settlement.trafficValue[otherPoint]; });
     }
     if (layerName === 'streets') {
       const grade = this.volume.streetGrades[pointIndex];

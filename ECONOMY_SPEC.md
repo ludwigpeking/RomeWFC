@@ -90,9 +90,13 @@ take rent, pay tax and upkeep, and invest.
 
 So that the model could be built for the film before the open points were answered:
 1. Utility by tier: hut 0.3, house 1, classical 1 (and 1.5 on a household's first two classical blocks).
-2. An investment is made only where it yields at least 5% of its cost a year.
+2. An investment is made only where it yields at least 3% of its cost a year (5% until 2026-10-07:
+   with 5%, huts on weak ground were never rebuilt as houses).
 3. Stacks: huts, houses, classical blocks, and a house with a classical ground or top floor.
 4. A year is 360 steps.
-Unit costs (a m²): hut 12, house 30, classical 130; each level up × 1.25. Tax 1% of the property
+Unit costs (a m²): hut 12, house 16, classical 110 (house 30, classical 130 until 2026-10-07: the
+user found too many huts before the town formalised); each level up × 1.25. A merchant arrives with
+500 and builds a house where the money reaches; a farmer arrives with 260 and builds a hut. A public
+building raises security by 4 over 5 steps (15 over 8 before: temples were too dominant). Tax 1% of the property
 value a year; upkeep 1% of the building value a year, 5% for classical floors; transaction tax 5%.
 Location value scale 0.003. All of these are parameters or constants at the head of settlement.js.

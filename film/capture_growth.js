@@ -31,14 +31,14 @@ const SHOTS = {
   // the town on the square ground, from empty ground on
   squareGrowth: {
     kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 80, ringCount: 18, parameters: {},
-    dayCount: 4500, frameCount: 1500, layers: ["none", "traffic", "security", "location", "landPrice", "height", "owners"],
-    camera: { startAngle: 0.55, turn: 0.9, startDistance: 2.9, endDistance: 2.2, elevation: 0.5, fieldOfView: 30 },
+    dayCount: 4500, frameCount: 1500, layers: ["none", "journeys", "security", "location", "landPrice", "height", "owners"],
+    camera: { startAngle: 0.55, turn: 0.9, startDistance: 2.5, endDistance: 1.8, elevation: 0.5, fieldOfView: 30 },
   },
   // ... and on the irregular ground
   hexGrowth: {
     kind: "growth", ground: "largeIrregular", seed: 2002, pointsAlongASide: 80, ringCount: 18, parameters: {},
-    dayCount: 4500, frameCount: 1200, layers: ["none", "location", "height"],
-    camera: { startAngle: 2.2, turn: -0.9, startDistance: 2.9, endDistance: 2.2, elevation: 0.5, fieldOfView: 30 },
+    dayCount: 4500, frameCount: 700, layers: ["none", "location", "height"],
+    camera: { startAngle: 2.2, turn: -0.9, startDistance: 2.5, endDistance: 1.8, elevation: 0.5, fieldOfView: 30 },
   },
   // the grown towns from near and low, the people walking
   squareBeauty: {
@@ -150,6 +150,7 @@ async function main() {
 
             if (shot.kind === "growth") {
                 const bounds = await evaluate("rome.filmPrepare(" + [JSON.stringify(shot.ground), shot.seed, shot.pointsAlongASide, shot.ringCount, JSON.stringify(shot.parameters)].join(",") + ")");
+                await evaluate("rome.filmFaintOpacity(0.05)");
                 await evaluate("rome.filmPeople(0, false)");
                 let dayReached = 0;
                 for (let frameNumber = 0; frameNumber < shot.frameCount; frameNumber++) {
@@ -172,10 +173,11 @@ async function main() {
             } else if (shot.kind === "grownOrbit") {
                 // a town lived to its day with nothing drawn, then filmed from near, the people walking
                 const bounds = await evaluate("rome.filmPrepare(" + [JSON.stringify(shot.ground), shot.seed, shot.pointsAlongASide, shot.ringCount, JSON.stringify(shot.parameters)].join(",") + ")");
+                await evaluate("rome.filmFaintOpacity(0.05)");
                 for (let dayReached = 0; dayReached < shot.dayCount; dayReached += 250) {
                     await evaluate("(function () { rome.settleOn(" + Math.min(250, shot.dayCount - dayReached) + "); return true; })()");
                 }
-                await evaluate("rome.filmAdvance(1)");
+                await evaluate("rome.rebuild()");
                 await evaluate("rome.filmLayer('none')");
                 for (let warm = 0; warm < 150; warm++) {
                     if (warm % 20 === 0) {
