@@ -85,3 +85,14 @@ take rent, pay tax and upkeep, and invest.
 3. Which tiers may be mixed in one stack when building on an existing building.
 4. How many steps of the simulation make a year (for the yearly rates).
 5. The exact meaning of "差值越小的压力越大" for the pressure of traffic on a building.
+
+## What the code assumes meanwhile (2026-10-06, marked ASSUMED in settlement.js)
+
+So that the model could be built for the film before the open points were answered:
+1. Utility by tier: hut 0.3, house 1, classical 1 (and 1.5 on a household's first two classical blocks).
+2. An investment is made only where it yields at least 5% of its cost a year.
+3. Stacks: huts, houses, classical blocks, and a house with a classical ground or top floor.
+4. A year is 360 steps.
+Unit costs (a m²): hut 12, house 30, classical 130; each level up × 1.25. Tax 1% of the property
+value a year; upkeep 1% of the building value a year, 5% for classical floors; transaction tax 5%.
+Location value scale 0.003. All of these are parameters or constants at the head of settlement.js.

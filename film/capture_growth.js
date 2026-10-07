@@ -21,7 +21,7 @@ const PICTURE_WIDTH = 1920;
 const PICTURE_HEIGHT = 1080;
 const FRAMES_PER_SECOND = 30;
 
-const ALL_DATA_LAYERS = ["none", "traffic", "streets", "security", "landPrice", "owners", "livelihood", "rent", "worth", "money", "pressure", "works"];
+const ALL_DATA_LAYERS = ["none", "traffic", "security", "location", "landPrice", "worth", "rent", "owners", "livelihood", "height", "pressure", "works"];
 
 // The shots. growth: a settlement from its first day, so many days for every frame, the camera
 // going slowly round it and coming nearer as it grows. orbit: a saved town, once round it.
@@ -32,6 +32,12 @@ const SHOTS = {
     kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
     dayCount: 3600, frameCount: 1200, layers: ALL_DATA_LAYERS,
     camera: { startAngle: 0.55, turn: 0.75, startDistance: 3.2, endDistance: 2.35, elevation: 0.5, fieldOfView: 30 },
+  },
+  // the same town from a camera that stands still, for laying one data layer over another
+  squareGrowthStill: {
+    kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
+    dayCount: 3600, frameCount: 600, layers: ["none", "traffic", "security", "location", "landPrice", "worth", "height", "owners"],
+    camera: { startAngle: 0.55, turn: 0, startDistance: 2.5, endDistance: 2.5, elevation: 0.75, fieldOfView: 30 },
   },
   hexGrowth: {
     kind: "growth", ground: "largeIrregular", seed: 2002, pointsAlongASide: 30, ringCount: 14, parameters: {},

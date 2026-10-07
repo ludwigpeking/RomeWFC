@@ -39,7 +39,6 @@ import { latticePatch } from './charts';
 import { cellSize } from './parts';
 
 export const CITY_PARAMETER_DEFAULTS = {
-  taxShareOfPropertyEachDay: 0.0003,       // of the worth of every property, land and building (settlement.js takes it)
   householdsScaleOfPublicBuildings: 1,     // all the bars of the public buildings, times this
   householdsForTheFirstFountain: 50,
   householdsUnservedForAnotherFountain: 40,
