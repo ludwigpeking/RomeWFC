@@ -64,7 +64,8 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   acquisitionPremium: 0.3,           // somebody else's property is bought at its value and this much more
   streetPremium: 2,                  // a street is bought at its price and this many times its price more
   gardenRentBonus: 0.15,             // a garden adds this to the rent of every property beside it
-  startingCapital: 250,
+  startingCapital: 500,              // what a merchant brings
+  farmerStartingCapital: 260,        // ... and a farmer: enough for land and a hut
   shareOfFarmers: 0.5,               // of the newcomers
   farmYieldEachDay: 0.06,            // what a farmer takes in a day from each parcel of farmland near it, shared with the other farmers there
   locationValueOfAMerchant: 60,      // a farmer whose home stands on a location of this value turns merchant
@@ -77,14 +78,14 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   shareOfTheBusiestStreet: 0.4,      // a street is busy from this share of the traffic of the busiest point
   chanceOfAShopOpeningEachDay: 0.01, // for each front of a house that looks at a busy street
   stepsABuildingCosts: 8,            // a journey that crosses a building counts it as so many steps
-  moneyWorthOfAStepSaved: 12,        // what a step saved by pulling a building down is worth to the city
+  moneyWorthOfAStepSaved: 6,         // what a step saved by pulling a building down is worth to the city
 };
 Object.assign(SETTLEMENT_PARAMETER_DEFAULTS, CITY_PARAMETER_DEFAULTS); // what the city does as a whole: city.js
 
 const daysInAYear = 360;
 const floorArea = 16;                    // square metres of one floor of a point (a cell is 4 m wide)
 const UNIT_COST_OF_TIER = {              // what a square metre of floor costs to build on the ground
-  [TIER.temporary]: 12, [TIER.vernacular]: 30, [TIER.classical]: 130,
+  [TIER.temporary]: 12, [TIER.vernacular]: 18, [TIER.classical]: 110,
 };
 const gardenPrice = 3;                   // a square metre of garden laid out
 // ASSUMED (the specification leaves open whether utility depends on the tier): a hut offers less
@@ -95,9 +96,9 @@ const STANDARD_BUILDING = [TIER.vernacular, TIER.vernacular]; // what open land 
 const leastLandPrice = 10;               // a parcel of land is never sold for less
 const MOST_LEVELS_OF_TIER = { [TIER.temporary]: 2, [TIER.vernacular]: 6, [TIER.classical]: 3 };
 const mostLevelsOfATower = 20;
-const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 15 };
+const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 4 };
 const stepsOfASecurityBoost = 3;         // a household raises the security this many steps round its home
-const stepsOfAPublicSecurityBoost = 8;
+const stepsOfAPublicSecurityBoost = 5;
 const stepsOfFarmland = 5;               // a farmer works the land this many steps round it
 const tradeRouteWeight = 12;
 const JOURNEY_WEIGHT = { farmer: 1, merchant: 2 };
@@ -673,7 +674,7 @@ export class Settlement {
   settleANewHousehold() {
     const parameters = parametersInUse;
     const livelihood = this.households.length === 0 || this.random.nextFloat() >= parameters.shareOfFarmers ? 'merchant' : 'farmer';
-    const capital = parameters.startingCapital;
+    const capital = livelihood === 'farmer' ? parameters.farmerStartingCapital : parameters.startingCapital;
     const hutCost = floorCost(TIER.temporary, 0);
     let site = -1;
     if (this.households.length === 0) {
@@ -718,8 +719,10 @@ export class Settlement {
     };
     this.households.push(household);
     this.buyLand(site, household);
-    this.buildOnPoint(site, [TIER.temporary]);
-    household.money -= hutCost;
+    // it builds what it can pay for: a house where the money reaches, a hut otherwise
+    const firstTier = household.money >= floorCost(TIER.vernacular, 0) ? TIER.vernacular : TIER.temporary;
+    this.buildOnPoint(site, [firstTier]);
+    household.money -= floorCost(firstTier, 0);
     return true;
   }
 
@@ -1371,6 +1374,24 @@ export class Settlement {
     if (household !== null && household.isCity) {
       return null;
     }
+    // (a layer is scaled by a high value of its own in the town as it stands: the 95th of a hundred)
+    const settlement = this;
+    function againstTheTown(value, valueOfPoint) {
+      const key = layerName + ':' + settlement.dayCount;
+      if (settlement.layerScaleKey !== key) {
+        const values = [];
+        for (let otherPoint = 0; otherPoint < settlement.map.points.length; otherPoint++) {
+          const otherValue = valueOfPoint(otherPoint);
+          if (otherValue > 0) {
+            values.push(otherValue);
+          }
+        }
+        values.sort(function (first, second) { return first - second; });
+        settlement.layerScale = values.length > 0 ? values[Math.floor(values.length * 0.95)] : 1;
+        settlement.layerScaleKey = key;
+      }
+      return value > 0 ? Math.max(0.04, Math.min(1, Math.sqrt(value / Math.max(1e-9, settlement.layerScale)))) : null;
+    }
     function onALogarithmicScale(value, highest) {
       return Math.max(0, Math.min(1, Math.log(1 + value) / Math.log(1 + highest)));
     }
@@ -1382,15 +1403,15 @@ export class Settlement {
       return household === null && grade > STREET_GRADE.yard ? grade / STREET_GRADE.busyStreet : null;
     }
     if (layerName === 'security') {
-      return this.security[pointIndex] > 1.01 ? onALogarithmicScale(this.security[pointIndex] - 1, 60) : null;
+      return this.security[pointIndex] > 1.01 ? againstTheTown(this.security[pointIndex] - 1, function (otherPoint) { return settlement.security[otherPoint] - 1; }) : null;
     }
     if (layerName === 'location') {
       const value = this.locationValueAt(pointIndex);
-      return value > 0.05 ? onALogarithmicScale(value, 400) : null;
+      return value > 0.05 ? againstTheTown(value, function (otherPoint) { return settlement.locationValueAt(otherPoint); }) : null;
     }
     if (layerName === 'landPrice') {
       const price = this.landPriceAt(pointIndex);
-      return price > 0.05 ? onALogarithmicScale(price, 400) : null;
+      return price > 0.05 ? againstTheTown(price, function (otherPoint) { return settlement.landPriceAt(otherPoint); }) : null;
     }
     if (layerName === 'height') {
       const stack = household === null ? [] : stackOf(this.volume, pointIndex);
@@ -1406,10 +1427,10 @@ export class Settlement {
       return household.livelihood === 'farmer' ? 0.15 : 0.9;
     }
     if (layerName === 'worth') {
-      return onALogarithmicScale(this.worthAsParcel(pointIndex), 60000);
+      return againstTheTown(this.worthAsParcel(pointIndex), function (otherPoint) { const owner = settlement.ownerOfPoint[otherPoint]; return owner !== null && !owner.isCity ? settlement.worthAsParcel(otherPoint) : 0; });
     }
     if (layerName === 'rent') {
-      return onALogarithmicScale(this.rentOfPoint(pointIndex) * daysInAYear, 20000);
+      return againstTheTown(this.rentOfPoint(pointIndex), function (otherPoint) { return settlement.rentOfPoint(otherPoint); });
     }
     if (layerName === 'money') {
       return onALogarithmicScale(household.money, 100000);

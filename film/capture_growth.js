@@ -28,37 +28,28 @@ const ALL_DATA_LAYERS = ["none", "traffic", "security", "location", "landPrice",
 // street: the people walking a busy street of a grown town, in their own time. gate: a walk at
 // eye height through a gate of the city.
 const SHOTS = {
+  // the town on the square ground, from empty ground on
   squareGrowth: {
-    kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
-    dayCount: 3600, frameCount: 1200, layers: ALL_DATA_LAYERS,
-    camera: { startAngle: 0.55, turn: 0.75, startDistance: 3.2, endDistance: 2.35, elevation: 0.5, fieldOfView: 30 },
+    kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 80, ringCount: 18, parameters: {},
+    dayCount: 4500, frameCount: 1500, layers: ["none", "traffic", "security", "location", "landPrice", "height", "owners"],
+    camera: { startAngle: 0.55, turn: 0.9, startDistance: 2.9, endDistance: 2.2, elevation: 0.5, fieldOfView: 30 },
   },
-  // the same town from a camera that stands still, for laying one data layer over another
-  squareGrowthStill: {
-    kind: "growth", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
-    dayCount: 3600, frameCount: 600, layers: ["none", "traffic", "security", "location", "landPrice", "worth", "height", "owners"],
-    camera: { startAngle: 0.55, turn: 0, startDistance: 2.5, endDistance: 2.5, elevation: 0.75, fieldOfView: 30 },
-  },
+  // ... and on the irregular ground
   hexGrowth: {
-    kind: "growth", ground: "largeIrregular", seed: 2002, pointsAlongASide: 30, ringCount: 14, parameters: {},
-    dayCount: 3600, frameCount: 1200, layers: ALL_DATA_LAYERS,
-    camera: { startAngle: 2.2, turn: -0.7, startDistance: 3.2, endDistance: 2.35, elevation: 0.52, fieldOfView: 30 },
+    kind: "growth", ground: "largeIrregular", seed: 2002, pointsAlongASide: 80, ringCount: 18, parameters: {},
+    dayCount: 4500, frameCount: 1200, layers: ["none", "location", "height"],
+    camera: { startAngle: 2.2, turn: -0.9, startDistance: 2.9, endDistance: 2.2, elevation: 0.5, fieldOfView: 30 },
   },
-  hugeOrbit: {
-    kind: "orbit", runFile: "huge_001.json", frameCount: 900, layers: ["none", "works", "owners"],
-    camera: { startAngle: 0.3, turn: 6.283, startDistance: 2.6, endDistance: 2.6, elevation: 0.42, fieldOfView: 30 },
+  // the grown towns from near and low, the people walking
+  squareBeauty: {
+    kind: "grownOrbit", ground: "square", seed: 2001, pointsAlongASide: 80, ringCount: 18, parameters: {},
+    dayCount: 4500, frameCount: 750, layers: ["none"],
+    camera: { startAngle: 0.2, turn: 1.1, startDistance: 1.25, endDistance: 0.95, elevation: 0.26, fieldOfView: 34 },
   },
-  hexOrbit: {
-    kind: "orbit", runFile: "huge_002.json", frameCount: 900, layers: ["none", "works"],
-    camera: { startAngle: 1.3, turn: 6.283, startDistance: 2.6, endDistance: 2.6, elevation: 0.42, fieldOfView: 30 },
-  },
-  street: {
-    kind: "street", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
-    dayCount: 2600, frameCount: 450,
-  },
-  gateWalk: {
-    kind: "gate", ground: "square", seed: 2001, pointsAlongASide: 50, ringCount: 8, parameters: {},
-    dayCount: 2600, frameCount: 360,
+  hexBeauty: {
+    kind: "grownOrbit", ground: "largeIrregular", seed: 2002, pointsAlongASide: 80, ringCount: 18, parameters: {},
+    dayCount: 4500, frameCount: 600, layers: ["none"],
+    camera: { startAngle: 1.0, turn: -1.1, startDistance: 1.25, endDistance: 0.95, elevation: 0.26, fieldOfView: 34 },
   },
 };
 
@@ -176,6 +167,34 @@ async function main() {
                     frameLog.write(JSON.stringify({ frame: frameNumber + 1, day: result.day, treasury: result.treasury, statistics: result.statistics, events: result.events, camera: view }) + "\n");
                     if (frameNumber % 50 === 0) {
                         console.log("  frame " + (frameNumber + 1) + " · day " + result.day + " · " + result.statistics.households + " households · " + Math.round((Date.now() - startTime) / 1000) + " s");
+                    }
+                }
+            } else if (shot.kind === "grownOrbit") {
+                // a town lived to its day with nothing drawn, then filmed from near, the people walking
+                const bounds = await evaluate("rome.filmPrepare(" + [JSON.stringify(shot.ground), shot.seed, shot.pointsAlongASide, shot.ringCount, JSON.stringify(shot.parameters)].join(",") + ")");
+                for (let dayReached = 0; dayReached < shot.dayCount; dayReached += 250) {
+                    await evaluate("(function () { rome.settleOn(" + Math.min(250, shot.dayCount - dayReached) + "); return true; })()");
+                }
+                await evaluate("rome.filmAdvance(1)");
+                await evaluate("rome.filmLayer('none')");
+                for (let warm = 0; warm < 150; warm++) {
+                    if (warm % 20 === 0) {
+                        await evaluate("(function () { rome.settleOn(1); return true; })()");
+                    }
+                    await evaluate("rome.filmPeople(" + (4 / FRAMES_PER_SECOND) + ", true)");
+                }
+                for (let frameNumber = 0; frameNumber < shot.frameCount; frameNumber++) {
+                    const view = cameraOnItsCircle(bounds, shot.camera, frameNumber / Math.max(1, shot.frameCount - 1));
+                    view.targetY = 6;
+                    await placeCamera(view);
+                    if (frameNumber % 20 === 0) {
+                        await evaluate("(function () { rome.settleOn(1); return true; })()");
+                    }
+                    await evaluate("rome.filmPeople(" + (1 / FRAMES_PER_SECOND) + ", true)");
+                    await takePicture(path.join(shotFolder, "none", "frame_" + String(frameNumber + 1).padStart(5, "0") + ".jpg"));
+                    frameLog.write(JSON.stringify({ frame: frameNumber + 1, camera: view }) + "\n");
+                    if (frameNumber % 100 === 0) {
+                        console.log("  frame " + (frameNumber + 1) + " · " + Math.round((Date.now() - startTime) / 1000) + " s");
                     }
                 }
             } else if (shot.kind === "orbit") {

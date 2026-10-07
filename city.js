@@ -550,7 +550,19 @@ function findTheRouteOfTheAqueduct(settlement, site) {
   const costTo = new Float64Array(pointCount).fill(Infinity);
   const cameFrom = new Int32Array(pointCount).fill(-1);
   const isSettled = new Uint8Array(pointCount);
+  // the arch of the city is not to be hidden: no aqueduct on its points nor on the ring round them
+  const isBesideTheArch = new Uint8Array(pointCount);
+  volume.publicBuildings.forEach(function (building) {
+    if (building.kind === 'cityArch' && building.grid) {
+      building.grid.forEach(function (row) {
+        row.forEach(function (pointIndex) { isBesideTheArch[pointIndex] = 1; });
+      });
+    }
+  });
   function moneyToPass(pointIndex) {
+    if (isBesideTheArch[pointIndex]) {
+      return Infinity;
+    }
     const works = volume.works[pointIndex];
     if (works & WORK.duct) {
       return 0;

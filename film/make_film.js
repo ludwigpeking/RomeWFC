@@ -417,7 +417,7 @@ const SCENE_DRAWERS = {
         if (frame) {
             const numbersAlpha = ease(ramp(time, lineStart(scene, 2) + 1.5, 0.8));
             counter(context, frame.statistics.worthOfAllProperty, "全城房产价值", 96, 680, numbersAlpha);
-            counter(context, frame.statistics.rentOfAllEachDay * 360, "全城一年的租金", 96, 810, numbersAlpha);
+            counter(context, frame.statistics.rentOfAllEachDay * 360, "全城一年的租金与农田收成", 96, 810, numbersAlpha);
         }
         chapterTitle(context, scene, time);
     },
