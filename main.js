@@ -1766,7 +1766,7 @@ window.rome = {
         samples.push(Object.assign({ day: day }, settlement.statistics(), settlement.studyNumbers()));
       }
     }
-    return { parameters: settlement.parameters, samples: samples, pointCount: map.points.length };
+    return { parameters: settlement.parameters, samples: samples, pointCount: map.points.length, points: settlement.pointsForMaps() };
   },
   // what the note beside the pointer says of a point while a data layer is on
   describeDataAt: function (pointIndex) { return settlement.describeDataAt(pointIndex); },

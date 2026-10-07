@@ -1476,6 +1476,24 @@ export class Settlement {
     };
   }
 
+  // Every point as it stands, for maps of the town: where it lies, the price of its land, how many
+  // floors stand on it and of what kind, its rent, and its owner (0: none)
+  pointsForMaps() {
+    const settlement = this;
+    return this.map.points.map(function (point, pointIndex) {
+      const household = settlement.ownerOfPoint[pointIndex];
+      const stack = stackOf(settlement.volume, pointIndex);
+      return {
+        x: Math.round(point.x * 10) / 10, z: Math.round(point.z * 10) / 10,
+        landPrice: Math.round(settlement.landPriceAt(pointIndex) * 100) / 100,
+        levels: stack[0] === TIER.garden ? 0 : stack.length, kind: kindOfStack(stack),
+        rent: Math.round(settlement.rentOfPoint(pointIndex) * 100) / 100,
+        owner: household === null ? 0 : household.isCity ? -1 : household.number,
+        isStreet: household === null && settlement.recentTraffic[pointIndex] >= roadRecentTraffic,
+      };
+    });
+  }
+
   // The town in numbers, for comparing one run with another
   statistics() {
     const settlement = this;
