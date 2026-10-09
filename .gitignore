@@ -18,3 +18,6 @@ film/voice/
 film/node_modules/
 film/*.mp4
 film/preview_frames/
+
+# set aside: earlier preview clips and the earlier recording of the narration
+archive/
