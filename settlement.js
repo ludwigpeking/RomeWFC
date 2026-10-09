@@ -262,6 +262,7 @@ export class Settlement {
       }
     });
     this.middlePoint = middlePoint;
+    volume.townMiddle = { x: map.points[middlePoint].x, z: map.points[middlePoint].z }; // (the wall looks out away from it)
     this.forum = { isPlace: true, kind: 'forum', pointIndices: [middlePoint] };
     this.otherTowns = this.chooseTheOtherTowns();
     if (this.otherTowns.length === 2) {

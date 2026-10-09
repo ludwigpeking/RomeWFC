@@ -4,9 +4,10 @@
 //
 // - The wall is built on the patches of its points, as a house is (patches.js): each point of
 //   wall is the whole ground of the quarters round it, of brick, 6 m high, so that the wall is a
-//   block thick, closes from point to point and is skewed with the grid. Merlons stand along the
-//   faces that look out of it. A tower (the same patch, higher) where it turns or ends and now
-//   and then on a straight run.
+//   block thick, closes from point to point and is skewed with the grid. Merlons stand only along
+//   the faces that look out of the town (away from its middle): towards the town the wall is a
+//   plain walk. A tower (the same patch, higher) where it turns or ends and now and then on a
+//   straight run.
 // - A gate is the patch of its point too: a gatehouse of stone with a passage through it from
 //   the face that looks out of the town to the face that looks in, an arch on each of the two,
 //   and the ground on either side of the passage raised as its two towers.
@@ -66,6 +67,19 @@ export function buildWorks(collector, volume) {
     const second = directionBetween(point, map.points[neighbourPoints[1]]);
     return first.x * second.x + first.z * second.z < -0.85;
   }
+  // The middle of the town (where its first settler stopped; without a settlement, the middle of
+  // the map): what looks away from it looks out of the town
+  const townMiddle = volume.townMiddle || { x: (map.bounds.minX + map.bounds.maxX) / 2, z: (map.bounds.minZ + map.bounds.maxZ) / 2 };
+  // whether a line in plan, seen from a point of the wall, lies on its outer side
+  function looksOutOfTheTown(point, start, end) {
+    const outwardX = point.x - townMiddle.x;
+    const outwardZ = point.z - townMiddle.z;
+    const outwardLength = Math.hypot(outwardX, outwardZ) || 1;
+    const towardsX = (start[0] + end[0]) / 2 - point.x;
+    const towardsZ = (start[1] + end[1]) / 2 - point.z;
+    const towardsLength = Math.hypot(towardsX, towardsZ) || 1;
+    return (towardsX * outwardX + towardsZ * outwardZ) / (towardsLength * outwardLength) > 0.25;
+  }
   // merlons along a line in plan, standing on a height
   function merlonsAlong(materialName, start, end, bottomY) {
     const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
@@ -88,8 +102,13 @@ export function buildWorks(collector, volume) {
       collector.polygonPrism('stoneShade', shrinkOutline(quarter.outline, point.x, point.z, -0.14), height, 0.25);
     });
     faces.forEach(function (face) {
+      if (has(face.neighbourPoint, WORK.wall | WORK.gate)) {
+        return; // (towards more wall: no parapet across the walk)
+      }
       stretchesOfFace(face).forEach(function (stretch) {
-        merlonsAlong(materialName, drawnIn(stretch[0], point, 0.02), drawnIn(stretch[1], point, 0.02), height + 0.25);
+        if (looksOutOfTheTown(point, stretch[0], stretch[1])) {
+          merlonsAlong(materialName, drawnIn(stretch[0], point, 0.02), drawnIn(stretch[1], point, 0.02), height + 0.25);
+        }
       });
     });
   }
@@ -119,6 +138,7 @@ export function buildWorks(collector, volume) {
   }
   // A gate on the patch of a point. Returns false where the patch has no two faces to pass through.
   function gateOnPatch(pointIndex, faces) {
+    const point = map.points[pointIndex];
     // the passage: from one face that looks out of the wall to the one most nearly opposite it
     const openFaceNumbers = [];
     faces.forEach(function (face, faceNumber) {
@@ -176,7 +196,9 @@ export function buildWorks(collector, volume) {
         prismOver(collector, map, 'stoneShade', piece, gateTowerHeight, 0.25);
       });
       for (let index = 0; index + 1 < chain.length; index++) {
-        merlonsAlong('stone', chain[index], chain[index + 1], gateTowerHeight + 0.25);
+        if (looksOutOfTheTown(point, chain[index], chain[index + 1])) {
+          merlonsAlong('stone', chain[index], chain[index + 1], gateTowerHeight + 0.25);
+        }
       }
     });
     // over the passage: the gatehouse from the crown of the arches up, and an arch on each face
@@ -188,7 +210,9 @@ export function buildWorks(collector, volume) {
       const reach = jamb.width / 2 + 0.45;
       collector.wallBetween('stone', jamb.middle[0] - jamb.alongX * reach, jamb.middle[1] - jamb.alongZ * reach, jamb.middle[0] + jamb.alongX * reach, jamb.middle[1] + jamb.alongZ * reach,
         0, gateArchHeight + 0.9, 0.7, [{ centre: 0, bottom: 0, width: jamb.width, height: gateArchHeight, isArched: true }]);
-      merlonsAlong('stone', outline[jamb.before], outline[jamb.after], gateHeight + 0.35);
+      if (looksOutOfTheTown(point, outline[jamb.before], outline[jamb.after])) {
+        merlonsAlong('stone', outline[jamb.before], outline[jamb.after], gateHeight + 0.35);
+      }
     });
     return true;
   }
@@ -217,7 +241,9 @@ export function buildWorks(collector, volume) {
             return;
           }
           stretchesOfFace(face).forEach(function (stretch) {
-            merlonsAlong('brick', drawnIn(stretch[0], point, 0.1), drawnIn(stretch[1], point, 0.1), wallHeight);
+            if (looksOutOfTheTown(point, stretch[0], stretch[1])) {
+              merlonsAlong('brick', drawnIn(stretch[0], point, 0.1), drawnIn(stretch[1], point, 0.1), wallHeight);
+            }
           });
         });
         if (wallNeighbours.length <= 2 && (!runsStraightThrough(point, wallNeighbours) || pointIndex % 5 === 0)) {
