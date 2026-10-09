@@ -29,7 +29,7 @@ export const MATERIAL_COLOURS = {
   person: 0x1f4e8c,       // the figure that stands by a building to show its scale
   timber: 0x7b5a3a,
   plank: 0xa98a5f,
-  thatch: 0xb59d5b,
+  thatch: 0x7c725a,
   // awnings: undyed linen, coarse hemp, a cloth dyed with madder and faded (bright dyes were dear)
   canvasMadder: 0xa9705a,
   canvasHemp: 0xa39577,

@@ -204,7 +204,9 @@ function collapseOnce(stretches, random, style) {
 // The roof is made on the quarters of the quads: every place of a quarter (its point, the middles
 // of its two sides, the middle of its quad) lies some half cells in from the eaves, and rises by
 // that much. roofRisePerCell: metres of roof height for each cell of distance from the eaves.
-export function buildRoofs(collector, volume, isBlock, roofRisePerCell, buildingOf) {
+// shadeKeyOf(pointIndex) (optional): a number that stays the same for a building while the town
+// changes round it; the shade of its tiles follows from it (without it: from buildingOf).
+export function buildRoofs(collector, volume, isBlock, roofRisePerCell, buildingOf, shadeKeyOf) {
   const map = volume.map;
   const notRoofed = -1;
   for (let level = 0; level < volume.usedLevelCount(); level++) {
@@ -284,7 +286,7 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
     // part of it over each point differs again by less
     const tints = [];
     roofedQuarters.forEach(function (quarter) {
-      const roofNumber = roofOf(quarter.pointIndex);
+      const roofNumber = shadeKeyOf ? shadeKeyOf(quarter.pointIndex) : roofOf(quarter.pointIndex);
       // (darker rather than lighter: in the sun the tiles are near the brightest the picture shows,
       // and a lighter shade would hardly be seen)
       const brightness = 1 - 0.45 * placeHash(roofNumber, level, 31) - 0.08 * placeHash(quarter.pointIndex, level, 37);

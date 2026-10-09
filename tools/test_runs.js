@@ -27,13 +27,10 @@ const PICTURE_HEIGHT = 720;
 const LAYERS = ["none", "location", "height"];
 const CAMERA = { angle: 0.6, distance: 2.3, elevation: 0.62, fieldOfView: 30 };
 
-// The runs. The author's table of 2026-10-09 gives the rent as "property value x 0.7" and the tax
-// as "property value x 0.1"; whether a year's rent is 70% or 7% of the value is tested both ways.
+// The runs: the parameters the app starts with (rent 7% and tax 1% of the value a year), on both grounds
 const RUNS = {
-  squareSevenPercent: { ground: "square", seed: 3001, pointsAlongASide: 60, ringCount: 14, parameters: { rentShareOfValueEachYear: 0.07, taxShareOfValueEachYear: 0.01 } },
-  squareAsWritten: { ground: "square", seed: 3001, pointsAlongASide: 60, ringCount: 14, parameters: { rentShareOfValueEachYear: 0.7, taxShareOfValueEachYear: 0.1 } },
-  irregularSevenPercent: { ground: "largeIrregular", seed: 3002, pointsAlongASide: 60, ringCount: 14, parameters: { rentShareOfValueEachYear: 0.07, taxShareOfValueEachYear: 0.01 } },
-  irregularAsWritten: { ground: "largeIrregular", seed: 3002, pointsAlongASide: 60, ringCount: 14, parameters: { rentShareOfValueEachYear: 0.7, taxShareOfValueEachYear: 0.1 } },
+  square: { ground: "square", seed: 3001, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  irregular: { ground: "largeIrregular", seed: 3002, pointsAlongASide: 60, ringCount: 14, parameters: {} },
 };
 
 function wait(milliseconds) {
@@ -65,7 +62,7 @@ function writeIndexPage() {
   header button.active { background: #c9963a; color: #1b1a18; }
   #runs { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 12px; padding: 12px 16px; }
   .run { background: #24231f; border: 1px solid #3a3833; }
-  .run img { width: 100%; display: block; }
+  .run img { width: 100%; height: auto; display: block; }
   .run h2 { font-size: 15px; margin: 8px 10px 2px; }
   .run table { margin: 4px 10px 10px; border-collapse: collapse; }
   .run td { padding: 1px 14px 1px 0; }
@@ -92,21 +89,34 @@ let playTimer = null;
 const longestRun = Math.max.apply(null, RUNS.map(function (run) { return run.snapshots.length; }));
 const slider = document.getElementById("daySlider");
 slider.max = String(longestRun - 1);
+// The cards are made once; a new day only changes the picture and the numbers in them, so that
+// the page keeps its height and its place while it plays
+const cardOfRun = RUNS.map(function (run) {
+  const card = document.createElement("div");
+  card.className = "run";
+  const picture = document.createElement("img");
+  picture.width = 1280;
+  picture.height = 720;
+  const heading = document.createElement("h2");
+  const table = document.createElement("table");
+  card.appendChild(picture);
+  card.appendChild(heading);
+  card.appendChild(table);
+  document.getElementById("runs").appendChild(card);
+  return { picture: picture, heading: heading, table: table };
+});
 function show() {
-  const runsElement = document.getElementById("runs");
-  runsElement.innerHTML = "";
   let dayShown = 0;
-  RUNS.forEach(function (run) {
+  RUNS.forEach(function (run, runNumber) {
     const snapshot = run.snapshots[Math.min(snapshotIndex, run.snapshots.length - 1)];
     dayShown = Math.max(dayShown, snapshot.day);
-    const card = document.createElement("div");
-    card.className = "run";
-    const rows = NUMBERS_SHOWN.map(function (entry) {
+    const card = cardOfRun[runNumber];
+    card.picture.src = run.name + "/" + layerName + "/day_" + String(snapshot.day).padStart(5, "0") + ".jpg";
+    card.heading.textContent = run.name + " \u00b7 day " + snapshot.day;
+    card.table.innerHTML = NUMBERS_SHOWN.map(function (entry) {
       const value = entry[0] === "treasury" ? snapshot.treasury : snapshot.statistics[entry[0]];
       return value === undefined ? "" : "<tr><td>" + entry[1] + "</td><td class='value'>" + value.toLocaleString("en-US") + "</td></tr>";
     }).join("");
-    card.innerHTML = "<img src='" + run.name + "/" + layerName + "/day_" + String(snapshot.day).padStart(5, "0") + ".jpg'><h2>" + run.name + " · day " + snapshot.day + "</h2><table>" + rows + "</table>";
-    runsElement.appendChild(card);
   });
   document.getElementById("dayText").textContent = String(dayShown);
 }

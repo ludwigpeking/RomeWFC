@@ -31,6 +31,7 @@
 // windows between the classical block and the house above. A wall parts it from the full rooms
 // beside it on its level.
 
+import { facesOfPatch, drawnIn, boxAlong, addSheetTriangle } from './patches';
 import { HOUSE_WALL_MATERIALS } from './parts';
 import { TIER, placeHash, vernacularLevelHeight } from './volume';
 import { shrinkOutline } from './topology';
@@ -265,13 +266,25 @@ export function buildVernacular(collector, volume, seed) {
       map.quartersOfPoint[place.pointIndex].forEach(function (quarter) {
         collector.polygonPrism('stoneShade', quarter.outline, bottomY - 0.02, 0.14);
       });
+      // (the pergola follows the patch: a post towards the middle of every quad round the point,
+      // a beam from post to post, the cloth over them)
       const pergolaHeight = 2.3;
-      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (corner) {
-        collector.box('timber', 0.13, pergolaHeight, 0.13, point.x + corner[0] * 1.15, bottomY + 0.12, point.z + corner[1] * 1.15);
+      const posts = [];
+      facesOfPatch(map, place.pointIndex).forEach(function (face) {
+        if (face.before !== null) {
+          posts.push(drawnIn(face.before, point, 0.42));
+        }
       });
-      collector.box('timber', 2.6, 0.1, 0.1, point.x, bottomY + 0.12 + pergolaHeight, point.z - 1.15);
-      collector.box('timber', 2.6, 0.1, 0.1, point.x, bottomY + 0.12 + pergolaHeight, point.z + 1.15);
-      collector.box(placeHash(place.pointIndex, place.level, seed + 72) < 0.5 ? 'canvasLinen' : 'canvasHemp', 2.5, 0.05, 2.5, point.x, bottomY + 0.22 + pergolaHeight, point.z);
+      const cloth = [];
+      const clothY = bottomY + 0.22 + pergolaHeight;
+      posts.forEach(function (post, postNumber) {
+        const next = posts[(postNumber + 1) % posts.length];
+        const towardsPoint = Math.hypot(point.x - post[0], point.z - post[1]) || 1;
+        boxAlong(collector, map, 'timber', post[0], post[1], (point.x - post[0]) / towardsPoint, (point.z - post[1]) / towardsPoint, 0.13, 0.13, bottomY + 0.12, pergolaHeight);
+        collector.wallBetween('timber', post[0], post[1], next[0], next[1], bottomY + 0.12 + pergolaHeight, 0.1, 0.1, []);
+        addSheetTriangle(cloth, [point.x, clothY, point.z], [post[0], clothY, post[1]], [next[0], clothY, next[1]], true);
+      });
+      collector.addTriangles(placeHash(place.pointIndex, place.level, seed + 72) < 0.5 ? 'canvasLinen' : 'canvasHemp', cloth);
       if (placeHash(place.pointIndex, place.level, seed + 73) < 0.5) {
         collector.person(point.x + 0.4, bottomY + 0.12, point.z - 0.3);
       }
@@ -333,6 +346,10 @@ export function buildVernacular(collector, volume, seed) {
   };
   buildRoofs(collector, volume, isRoofedBlock, roofRisePerCell, function (pointIndex) {
     return houses.houseOfPoint[pointIndex];
+  }, function (pointIndex) {
+    // (the shade of the tiles stays with the owner, as the plaster does; a town drawn by hand has no owners)
+    const owner = volume.ownerAt(pointIndex);
+    return owner !== 0 ? owner : houses.houseOfPoint[pointIndex];
   });
   return stretches;
 }

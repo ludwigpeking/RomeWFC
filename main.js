@@ -22,7 +22,7 @@ import { buildWorks } from './works';
 import { buildGardens } from './gardens';
 import { buildCatalogue, codeOfMonument } from './catalogue';
 import { findCoplanarOverlaps } from './coplanar';
-import { Settlement, roadRecentTraffic, SETTLEMENT_PARAMETER_DEFAULTS } from './settlement';
+import { Settlement, roadRecentTraffic, SETTLEMENT_PARAMETER_DEFAULTS, LAYER_BANDS } from './settlement';
 import { CITY_PARAMETER_DEFAULTS, PUBLIC_BUILDINGS } from './city';
 import { MODELS } from './models';
 import { listPieceKinds, describePiece, pieceGeometry, placedPieceGeometry, measuresOfKind, minceModel } from './mince';
@@ -511,17 +511,17 @@ function rebuildSettledTown() {
 // darker the more they do, and larger where it counts as road); the others are drawn over the
 // town, seen through the buildings, as the patch of ground round each point.
 const DATA_LAYER_LEGENDS = {
-  journeys: 'Traffic as it enters the value of a location: the journeys that crossed a point and passed beside it, the older ones fading. Scaled against the busiest places of the town.',
+  journeys: 'Traffic as it enters the value of a location: the journeys that crossed a point and passed beside it, the older ones fading.',
   traffic: 'The paths people have trodden lately that are not yet streets. Streets are cobbled, busy streets paved.',
   streets: 'Free ground by its grade: street (pale), busy street (red). Blue: ground kept open before a monument.',
   owners: 'One colour for every household: its parcel. Houses grow together only inside a parcel.',
   livelihood: 'Farmers (pale) and merchants (red).',
   security: 'Security: what the households and the public buildings bring to the ground round them (pale: little, red: much).',
-  location: 'The value of a location, a square metre: traffic × security (pale: low, red: high; a logarithmic scale).',
+  location: 'The value of a location, a square metre: traffic × security (pale: low, red: high).',
   landPrice: 'The price of land, a square metre: property value − building value; open land as if a standard building stood on it.',
   height: 'How many floors stand on each point (pale: one, red: six).',
   rent: 'What each point lets for in a day (pale: little, red: much).',
-  money: 'What each household holds (pale: little, red: much; a logarithmic scale).',
+  money: 'What each household holds (pale: little, red: much).',
   worth: 'What each parcel is worth, land and building (pale: little, red: much).',
   pressure: 'How near a building is to being broken through by traffic (red: about to fall).',
   works: 'The works of the city: walls (dark), gates (gold), the aqueduct (blue), fountains (bright blue); the ground within the walls is tinted.',
@@ -687,7 +687,9 @@ function showDataLayer() {
     dataLayerMesh.material.dispose();
     dataLayerMesh = null;
   }
-  document.getElementById('dataLayerLegend').textContent = DATA_LAYER_LEGENDS[dataLayerName];
+  // (a layer with fixed bands names them: the same colour for the same value, always)
+  document.getElementById('dataLayerLegend').textContent = DATA_LAYER_LEGENDS[dataLayerName] +
+    (LAYER_BANDS[dataLayerName] ? ' Fixed bands, pale to red, from: ' + LAYER_BANDS[dataLayerName].join(', ') + '.' : '');
   if (settlement === null || dataLayerName === 'none') {
     return;
   }

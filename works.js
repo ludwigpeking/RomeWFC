@@ -1,13 +1,16 @@
 // Purpose: the works of the city that are not buildings of blocks: the wall with its towers and
 // gates, the aqueduct, the fountains. They lie on the points of the grid like everything else
-// (volume.works tells what lies on each point), but they are narrow: a block is 4 m wide, a wall
-// or an aqueduct 2 m. They run from point to point along the sides of the quads.
+// (volume.works tells what lies on each point).
 //
-// - The wall: of brick, 6 m high, with a walk and merlons, a tower where it turns or ends and now
+// - The wall is built on the patches of its points, as a house is (patches.js): each point of
+//   wall is the whole ground of the quarters round it, of brick, 6 m high, so that the wall is a
+//   block thick, closes from point to point and is skewed with the grid. Merlons stand along the
+//   faces that look out of it. A tower (the same patch, higher) where it turns or ends and now
 //   and then on a straight run.
-// - A gate takes the place of the wall on its point: a gatehouse of stone higher and deeper than
-//   the wall, a tall arch through it across the wall, a tower at each end of it. The wall begins
-//   again beyond the towers.
+// - A gate is the patch of its point too: a gatehouse of stone with a passage through it from
+//   the face that looks out of the town to the face that looks in, an arch on each of the two,
+//   and the ground on either side of the passage raised as its two towers.
+// - The aqueduct is narrow (2 m) and runs from point to point along the sides of the quads.
 // - The aqueduct: of rough stone, an arcade that carries its channel 8 m above the ground. Its
 //   piers stand between the points and its arches over them, so that a street passes under an
 //   arch. Where it turns, branches or ends it stands on a pier at the point itself, and the water
@@ -16,15 +19,15 @@
 
 import { cellSize } from './parts';
 import { WORK } from './volume';
+import { shrinkOutline } from './topology';
+import { facesOfPatch, stretchesOfFace, drawnIn, prismOver, boxAlong } from './patches';
 
 const wallHeight = 6;
-const wallThickness = 2;
 const towerHeight = 9;
-const towerSize = 3;
-const gateHeight = 10;
-const gateDepth = 4.2;              // across the wall
-const gateTowerSize = 2.8;
-const gateTowerHeight = 12;
+const gateHeight = 10;              // over the passage
+const gateTowerHeight = 12;         // on either side of it
+const gateArchHeight = 6.2;
+const widestGateArch = 2.8;
 const aqueductHeight = 8;
 const aqueductThickness = 2;
 const channelWallThickness = 0.4;
@@ -63,19 +66,132 @@ export function buildWorks(collector, volume) {
     const second = directionBetween(point, map.points[neighbourPoints[1]]);
     return first.x * second.x + first.z * second.z < -0.85;
   }
-  // a tower: a square shaft with merlons round its top, turned the way the wall runs
-  function tower(materialName, centreX, centreZ, alongX, alongZ, height, size) {
-    turnedBox(materialName, centreX, centreZ, alongX, alongZ, size, size, 0, height);
-    turnedBox('stoneShade', centreX, centreZ, alongX, alongZ, size + 0.3, size + 0.3, height, 0.25);
-    [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]].forEach(function (place) {
-      const offsetAlong = place[0] * (size / 2 - 0.3);
-      const offsetAcross = place[1] * (size / 2 - 0.3);
-      turnedBox(materialName, centreX + offsetAlong * alongX - offsetAcross * alongZ, centreZ + offsetAlong * alongZ + offsetAcross * alongX,
-        alongX, alongZ, 0.6, 0.6, height + 0.25, 0.7);
+  // merlons along a line in plan, standing on a height
+  function merlonsAlong(materialName, start, end, bottomY) {
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (length < 0.5) {
+      return;
+    }
+    const alongX = (end[0] - start[0]) / length;
+    const alongZ = (end[1] - start[1]) / length;
+    const merlonCount = Math.max(1, Math.round(length / 1.3));
+    for (let merlon = 0; merlon < merlonCount; merlon++) {
+      const distance = (merlon + 0.5) * length / merlonCount;
+      boxAlong(collector, map, materialName, start[0] + alongX * distance, start[1] + alongZ * distance, alongX, alongZ, 0.65, 0.4, bottomY, 0.7);
+    }
+  }
+  // a tower on the patch of a point: the patch a little wider, higher, merlons round its top
+  function towerOnPatch(materialName, pointIndex, faces, height) {
+    const point = map.points[pointIndex];
+    map.quartersOfPoint[pointIndex].forEach(function (quarter) {
+      collector.polygonPrism(materialName, shrinkOutline(quarter.outline, point.x, point.z, -0.08), 0, height);
+      collector.polygonPrism('stoneShade', shrinkOutline(quarter.outline, point.x, point.z, -0.14), height, 0.25);
+    });
+    faces.forEach(function (face) {
+      stretchesOfFace(face).forEach(function (stretch) {
+        merlonsAlong(materialName, drawnIn(stretch[0], point, 0.02), drawnIn(stretch[1], point, 0.02), height + 0.25);
+      });
     });
   }
-  // how far from its point a gate reaches along the wall: its arch and the towers at its ends
-  const reachOfAGate = cellSize / 2 - 0.3 + gateTowerSize - 0.4;
+  // The ground between a chain of places and the straight line from its first to its last, as
+  // convex pieces: each from two places of the chain to their feet on the line
+  function piecesUnderChain(chain) {
+    const first = chain[0];
+    const last = chain[chain.length - 1];
+    const lineLength = Math.hypot(last[0] - first[0], last[1] - first[1]) || 1;
+    const lineX = (last[0] - first[0]) / lineLength;
+    const lineZ = (last[1] - first[1]) / lineLength;
+    const feet = chain.map(function (place) {
+      const distance = Math.max(0, Math.min(lineLength, (place[0] - first[0]) * lineX + (place[1] - first[1]) * lineZ));
+      return [first[0] + lineX * distance, first[1] + lineZ * distance];
+    });
+    const pieces = [];
+    for (let index = 0; index + 1 < chain.length; index++) {
+      const piece = [chain[index], chain[index + 1], feet[index + 1], feet[index]].filter(function (place, placeNumber, places) {
+        const before = places[(placeNumber + places.length - 1) % places.length];
+        return Math.hypot(place[0] - before[0], place[1] - before[1]) > 0.01;
+      });
+      if (piece.length >= 3) {
+        pieces.push(piece);
+      }
+    }
+    return pieces;
+  }
+  // A gate on the patch of a point. Returns false where the patch has no two faces to pass through.
+  function gateOnPatch(pointIndex, faces) {
+    // the passage: from one face that looks out of the wall to the one most nearly opposite it
+    const openFaceNumbers = [];
+    faces.forEach(function (face, faceNumber) {
+      if (!has(face.neighbourPoint, WORK.wall | WORK.gate) && face.before !== null && face.after !== null) {
+        openFaceNumbers.push(faceNumber);
+      }
+    });
+    let passage = null;
+    openFaceNumbers.forEach(function (firstNumber) {
+      openFaceNumbers.forEach(function (secondNumber) {
+        const facing = faces[firstNumber].towards.x * faces[secondNumber].towards.x + faces[firstNumber].towards.z * faces[secondNumber].towards.z;
+        if (firstNumber < secondNumber && (passage === null || facing < passage.facing)) {
+          passage = { first: firstNumber, second: secondNumber, facing: facing };
+        }
+      });
+    });
+    if (passage === null || passage.facing > 0.35) {
+      return false;
+    }
+    // the outline of the patch, round; on the two faces of the passage it runs straight, and the
+    // jambs of the arch are places on it
+    const outline = [];
+    const jambs = {}; // face number -> { before: place number, after: place number, width }
+    faces.forEach(function (face, faceNumber) {
+      if (faceNumber === passage.first || faceNumber === passage.second) {
+        const length = Math.hypot(face.after[0] - face.before[0], face.after[1] - face.before[1]);
+        const alongX = (face.after[0] - face.before[0]) / length;
+        const alongZ = (face.after[1] - face.before[1]) / length;
+        const archWidth = Math.max(1.2, Math.min(widestGateArch, length - 1.0));
+        const middle = [(face.before[0] + face.after[0]) / 2, (face.before[1] + face.after[1]) / 2];
+        outline.push(face.before);
+        jambs[faceNumber] = { before: outline.length, after: outline.length + 1, width: archWidth, alongX: alongX, alongZ: alongZ, middle: middle };
+        outline.push([middle[0] - alongX * archWidth / 2, middle[1] - alongZ * archWidth / 2]);
+        outline.push([middle[0] + alongX * archWidth / 2, middle[1] + alongZ * archWidth / 2]);
+      } else {
+        if (face.before !== null) {
+          outline.push(face.before);
+        }
+        outline.push(face.middle);
+      }
+    });
+    function chainBetween(fromPlace, toPlace) {
+      const chain = [];
+      for (let placeNumber = fromPlace; ; placeNumber = (placeNumber + 1) % outline.length) {
+        chain.push(outline[placeNumber]);
+        if (placeNumber === toPlace) {
+          return chain;
+        }
+      }
+    }
+    // the two towers: the ground on either side of the passage
+    [chainBetween(jambs[passage.first].after, jambs[passage.second].before), chainBetween(jambs[passage.second].after, jambs[passage.first].before)].forEach(function (chain) {
+      piecesUnderChain(chain).forEach(function (piece) {
+        prismOver(collector, map, 'stone', piece, 0, gateTowerHeight);
+        prismOver(collector, map, 'stoneShade', piece, gateTowerHeight, 0.25);
+      });
+      for (let index = 0; index + 1 < chain.length; index++) {
+        merlonsAlong('stone', chain[index], chain[index + 1], gateTowerHeight + 0.25);
+      }
+    });
+    // over the passage: the gatehouse from the crown of the arches up, and an arch on each face
+    const overThePassage = [outline[jambs[passage.first].before], outline[jambs[passage.first].after], outline[jambs[passage.second].before], outline[jambs[passage.second].after]];
+    prismOver(collector, map, 'stone', overThePassage, gateArchHeight, gateHeight - gateArchHeight);
+    prismOver(collector, map, 'stoneShade', overThePassage, gateHeight, 0.35);
+    [passage.first, passage.second].forEach(function (faceNumber) {
+      const jamb = jambs[faceNumber];
+      const reach = jamb.width / 2 + 0.45;
+      collector.wallBetween('stone', jamb.middle[0] - jamb.alongX * reach, jamb.middle[1] - jamb.alongZ * reach, jamb.middle[0] + jamb.alongX * reach, jamb.middle[1] + jamb.alongZ * reach,
+        0, gateArchHeight + 0.9, 0.7, [{ centre: 0, bottom: 0, width: jamb.width, height: gateArchHeight, isArched: true }]);
+      merlonsAlong('stone', outline[jamb.before], outline[jamb.after], gateHeight + 0.35);
+    });
+    return true;
+  }
 
   for (let pointIndex = 0; pointIndex < volume.pointCount; pointIndex++) {
     const works = volume.works[pointIndex];
@@ -84,65 +200,30 @@ export function buildWorks(collector, volume) {
     }
     const point = map.points[pointIndex];
 
-    // ---- the wall and its gates
+    // ---- the wall and its gates: on the patch of the point
     if (works & (WORK.wall | WORK.gate)) {
       const wallNeighbours = neighboursWith(pointIndex, WORK.wall | WORK.gate);
-      wallNeighbours.forEach(function (neighbourPoint) {
-        if (neighbourPoint < pointIndex) {
-          return; // each stretch once
-        }
-        const neighbour = map.points[neighbourPoint];
-        const along = directionBetween(point, neighbour);
-        // a gate takes the place of the wall beside its point: the wall begins beyond its towers
-        const startDistance = has(pointIndex, WORK.gate) ? Math.min(reachOfAGate, along.length / 2) : 0;
-        const endDistance = along.length - (has(neighbourPoint, WORK.gate) ? Math.min(reachOfAGate, along.length / 2) : 0);
-        if (endDistance - startDistance < 0.3) {
-          return;
-        }
-        const startX = point.x + along.x * startDistance, startZ = point.z + along.z * startDistance;
-        const endX = point.x + along.x * endDistance, endZ = point.z + along.z * endDistance;
-        collector.wallBetween('brick', startX, startZ, endX, endZ, 0, wallHeight, wallThickness, []);
-        // merlons along both edges of the walk
-        const merlonCount = Math.max(1, Math.round((endDistance - startDistance) / 1.3));
-        for (let merlon = 0; merlon < merlonCount; merlon++) {
-          const distance = startDistance + (merlon + 0.5) * (endDistance - startDistance) / merlonCount;
-          [-1, 1].forEach(function (edge) {
-            turnedBox('brick', point.x + along.x * distance - edge * along.z * (wallThickness / 2 - 0.2), point.z + along.z * distance + edge * along.x * (wallThickness / 2 - 0.2),
-              along.x, along.z, 0.65, 0.4, wallHeight, 0.7);
-          });
-        }
-      });
-      if (works & WORK.gate) {
-        // The gatehouse lies along the wall: from the neighbour on one side to the one on the
-        // other where there are two, so that it joins the wall on both; its arch goes through
-        // it across the wall.
-        let alongWall = wallNeighbours.length > 0 ? directionBetween(point, map.points[wallNeighbours[0]]) : { x: 1, z: 0 };
-        if (wallNeighbours.length >= 2) {
-          alongWall = directionBetween(map.points[wallNeighbours[1]], map.points[wallNeighbours[0]]);
-        }
-        const archLength = cellSize - 0.6;
-        collector.wallBetween('stone', point.x - alongWall.x * archLength / 2, point.z - alongWall.z * archLength / 2,
-          point.x + alongWall.x * archLength / 2, point.z + alongWall.z * archLength / 2, 0, gateHeight, gateDepth,
-          [{ centre: 0, bottom: 0, width: 2.8, height: 6.2, isArched: true }]);
-        turnedBox('stoneShade', point.x, point.z, alongWall.x, alongWall.z, archLength + 0.2, gateDepth + 0.4, gateHeight, 0.35);
-        // a band over the arch on both faces, and merlons along both
-        [-1, 1].forEach(function (face) {
-          turnedBox('stoneShade', point.x - face * alongWall.z * (gateDepth / 2 + 0.08), point.z + face * alongWall.x * (gateDepth / 2 + 0.08),
-            alongWall.x, alongWall.z, archLength, 0.16, 7.0, 0.35);
-          [-1.2, 0, 1.2].forEach(function (place) {
-            turnedBox('stone', point.x + place * alongWall.x - face * alongWall.z * (gateDepth / 2 - 0.25), point.z + place * alongWall.z + face * alongWall.x * (gateDepth / 2 - 0.25),
-              alongWall.x, alongWall.z, 0.7, 0.5, gateHeight + 0.35, 0.75);
+      const faces = facesOfPatch(map, pointIndex);
+      const isGateBuilt = (works & WORK.gate) !== 0 && gateOnPatch(pointIndex, faces);
+      if ((works & WORK.gate) !== 0 && !isGateBuilt) {
+        towerOnPatch('stone', pointIndex, faces, gateTowerHeight); // no two faces to pass through
+      } else if (!isGateBuilt) {
+        map.quartersOfPoint[pointIndex].forEach(function (quarter) {
+          collector.polygonPrism('brick', quarter.outline, 0, wallHeight);
+        });
+        // merlons along the faces that look out of the wall
+        faces.forEach(function (face) {
+          if (has(face.neighbourPoint, WORK.wall | WORK.gate)) {
+            return;
+          }
+          stretchesOfFace(face).forEach(function (stretch) {
+            merlonsAlong('brick', drawnIn(stretch[0], point, 0.1), drawnIn(stretch[1], point, 0.1), wallHeight);
           });
         });
-        // the two towers that flank it
-        [-1, 1].forEach(function (end) {
-          const distance = end * (archLength / 2 + gateTowerSize / 2 - 0.4);
-          tower('stone', point.x + alongWall.x * distance, point.z + alongWall.z * distance, alongWall.x, alongWall.z, gateTowerHeight, gateTowerSize);
-        });
-      } else if (wallNeighbours.length <= 2 && (!runsStraightThrough(point, wallNeighbours) || pointIndex % 5 === 0)) {
-        // a tower where the wall turns or ends, and now and then on a straight run
-        const along = wallNeighbours.length > 0 ? directionBetween(point, map.points[wallNeighbours[0]]) : { x: 1, z: 0 };
-        tower('brick', point.x, point.z, along.x, along.z, towerHeight, towerSize);
+        if (wallNeighbours.length <= 2 && (!runsStraightThrough(point, wallNeighbours) || pointIndex % 5 === 0)) {
+          // a tower where the wall turns or ends, and now and then on a straight run
+          towerOnPatch('brick', pointIndex, faces, towerHeight);
+        }
       }
     }
 

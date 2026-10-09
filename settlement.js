@@ -123,6 +123,18 @@ const leastBusyStreetRecentTraffic = 8;
 const shareOfTrafficThatKeepsAGrade = 0.6;
 const pressureKeptEachDay = 0.995;
 
+// The data layers have fixed bands: a point is coloured by the highest of these values that its own
+// reaches (below the first: nothing shown, or the palest). Each band is twice the one before.
+export const LAYER_BANDS = {
+  journeys: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],   // traffic value
+  security: [1, 2, 4, 8, 16, 32, 64],                           // security above the bare ground's 1
+  location: [25, 50, 100, 200, 400, 800, 1600, 3200],           // value of a location, a tile
+  landPrice: [2, 4, 8, 16, 32, 64, 128, 256],                   // land value, a square metre
+  worth: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],      // a parcel's worth
+  rent: [10, 20, 40, 80, 160, 320, 640, 1280],                  // rent of a point, a year
+  money: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],      // what a household holds
+};
+
 let parametersInUse = Object.assign({}, SETTLEMENT_PARAMETER_DEFAULTS);
 
 // Sets the parameters: the defaults, and over them whatever is given. Returns all of them.
@@ -1481,48 +1493,36 @@ export class Settlement {
     if (household !== null && household.isCity) {
       return null;
     }
-    // (a layer is scaled by a high value of its own in the town as it stands: the 95th of a hundred)
-    const settlement = this;
-    function againstTheTown(value, valueOfPoint) {
-      const key = layerName + ':' + settlement.dayCount;
-      if (settlement.layerScaleKey !== key) {
-        const values = [];
-        for (let otherPoint = 0; otherPoint < settlement.map.points.length; otherPoint++) {
-          const otherValue = valueOfPoint(otherPoint);
-          if (otherValue > 0) {
-            values.push(otherValue);
-          }
-        }
-        values.sort(function (first, second) { return first - second; });
-        settlement.layerScale = values.length > 0 ? values[Math.floor(values.length * 0.95)] : 1;
-        settlement.layerScaleKey = key;
+    // (a layer has fixed bands: a value has the same colour on any day and in any town)
+    function inFixedBands(value, layerOfBands) {
+      const bands = LAYER_BANDS[layerOfBands];
+      let bandsReached = 0;
+      while (bandsReached < bands.length && value >= bands[bandsReached]) {
+        bandsReached++;
       }
-      return value > 0 ? Math.max(0.04, Math.min(1, Math.sqrt(value / Math.max(1e-9, settlement.layerScale)))) : null;
-    }
-    function onALogarithmicScale(value, highest) {
-      return Math.max(0, Math.min(1, Math.log(1 + value) / Math.log(1 + highest)));
+      return bandsReached / bands.length;
     }
     if (layerName === 'traffic') {
       return household === null && this.recentTraffic[pointIndex] >= 0.5 ? Math.min(1, this.recentTraffic[pointIndex] / (4 * roadRecentTraffic)) : null;
     }
     if (layerName === 'journeys') {
       // the traffic that enters the value of a location
-      return againstTheTown(this.trafficValue[pointIndex], function (otherPoint) { return settlement.trafficValue[otherPoint]; });
+      return this.trafficValue[pointIndex] >= LAYER_BANDS.journeys[0] ? inFixedBands(this.trafficValue[pointIndex], 'journeys') : null;
     }
     if (layerName === 'streets') {
       const grade = this.volume.streetGrades[pointIndex];
       return household === null && grade > STREET_GRADE.yard ? grade / STREET_GRADE.busyStreet : null;
     }
     if (layerName === 'security') {
-      return this.security[pointIndex] > 1.01 ? againstTheTown(this.security[pointIndex] - 1, function (otherPoint) { return settlement.security[otherPoint] - 1; }) : null;
+      return this.security[pointIndex] - 1 >= LAYER_BANDS.security[0] ? inFixedBands(this.security[pointIndex] - 1, 'security') : null;
     }
     if (layerName === 'location') {
       const value = this.locationValueAt(pointIndex);
-      return value > 0.05 ? againstTheTown(value, function (otherPoint) { return settlement.locationValueAt(otherPoint); }) : null;
+      return value >= LAYER_BANDS.location[0] ? inFixedBands(value, 'location') : null;
     }
     if (layerName === 'landPrice') {
       const price = this.landPriceAt(pointIndex);
-      return price > 0.05 ? againstTheTown(price, function (otherPoint) { return settlement.landPriceAt(otherPoint); }) : null;
+      return price >= LAYER_BANDS.landPrice[0] ? inFixedBands(price, 'landPrice') : null;
     }
     if (layerName === 'height') {
       const stack = household === null ? [] : stackOf(this.volume, pointIndex);
@@ -1538,13 +1538,13 @@ export class Settlement {
       return household.livelihood === 'farmer' ? 0.15 : 0.9;
     }
     if (layerName === 'worth') {
-      return againstTheTown(this.worthAsParcel(pointIndex), function (otherPoint) { const owner = settlement.ownerOfPoint[otherPoint]; return owner !== null && !owner.isCity ? settlement.worthAsParcel(otherPoint) : 0; });
+      return inFixedBands(this.worthAsParcel(pointIndex), 'worth');
     }
     if (layerName === 'rent') {
-      return againstTheTown(this.rentOfPoint(pointIndex), function (otherPoint) { return settlement.rentOfPoint(otherPoint); });
+      return inFixedBands(this.rentOfPoint(pointIndex) * daysInAYear, 'rent');
     }
     if (layerName === 'money') {
-      return onALogarithmicScale(household.money, 100000);
+      return inFixedBands(household.money, 'money');
     }
     if (layerName === 'pressure') {
       return Math.min(1, this.pressure[pointIndex] * parametersInUse.moneyWorthOfAStepSaved / Math.max(1, this.worthAsParcel(pointIndex)));

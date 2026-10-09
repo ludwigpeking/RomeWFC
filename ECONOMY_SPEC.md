@@ -123,7 +123,7 @@ landValue of a vacant vertex = traffic x security x 1.5; of a street vertex = tr
 What the code assumes to run it (ASSUMED in settlement.js):
 - Money: a tile of base cost 1 costs 256; the value of a location, for a tile, = traffic x security x 0.007.
 - Farmland value: 30 a point.
-- Rent 0.7 and tax 0.1: tested both as written (70% and 10% of the value a year) and as 7% and 1%.
+- Rent and tax: 7% and 1% of the value a year (the author, 2026-10-09: "rent should 7% a year, tax 1% a year").
 - The tower bonus is taken as written: 1.02 x (levels - 6), so 1.02 at 7 levels and 2.04 at 8.
 - Above the sixth level: cost multiplier 0.05 more with each level; utility as on the sixth.
 - A property is the ground a household holds in one piece; an entrance cell is the street beside a

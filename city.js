@@ -860,11 +860,23 @@ function chooseTheGates(settlement, wallPoints) {
     if (neighbours.length !== 2) {
       return false;
     }
-    const first = map.points[neighbours[0]];
-    const second = map.points[neighbours[1]];
-    const cosine = ((first.x - point.x) * (second.x - point.x) + (first.z - point.z) * (second.z - point.z)) /
-      (Math.hypot(first.x - point.x, first.z - point.z) * Math.hypot(second.x - point.x, second.z - point.z));
-    return cosine < -0.85;
+    function cosineBetween(firstNeighbour, secondNeighbour) {
+      const first = map.points[firstNeighbour];
+      const second = map.points[secondNeighbour];
+      return ((first.x - point.x) * (second.x - point.x) + (first.z - point.z) * (second.z - point.z)) /
+        (Math.hypot(first.x - point.x, first.z - point.z) * Math.hypot(second.x - point.x, second.z - point.z));
+    }
+    if (cosineBetween(neighbours[0], neighbours[1]) >= -0.85) {
+      return false;
+    }
+    // ... and there is a way through it: two neighbours that are not of the wall, on either side
+    // of it (a point where three quads meet has only one such neighbour, and no gate can stand on it)
+    const others = Array.from(map.sideNeighboursOfPoint[pointIndex]).filter(function (neighbourPoint) { return !isOfTheWallSet.has(neighbourPoint); });
+    return others.some(function (firstOther) {
+      return others.some(function (secondOther) {
+        return firstOther < secondOther && cosineBetween(firstOther, secondOther) < 0.2;
+      });
+    });
   }
   function isFarFromTheGates(pointIndex) {
     const point = map.points[pointIndex];

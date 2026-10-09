@@ -29,7 +29,7 @@ MATERIALS = [
     ('person', 0x1f4e8c, 'flat', 1.0),
     ('timber', 0x7b5a3a, 'grain', 1.0),
     ('plank', 0xa98a5f, 'boards', 1.2),
-    ('thatch', 0xb59d5b, 'thatch', 1.0),
+    ('thatch', 0x7c725a, 'thatch', 1.0),
     # awnings: undyed linen, coarse hemp, and a cloth dyed with madder and faded by the sun
     ('canvasMadder', 0xa9705a, 'cloth', 1.0),
     ('canvasHemp', 0xa39577, 'cloth', 1.0),
