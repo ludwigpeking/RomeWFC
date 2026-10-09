@@ -13,6 +13,7 @@ film/test_four.jpg
 film/log_*.txt
 __pycache__/
 tools/study/
+tools/tests/
 film/fonts/
 film/voice/
 film/node_modules/

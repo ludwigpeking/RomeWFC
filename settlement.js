@@ -3,25 +3,27 @@
 // specification leaves open (ASSUMED).
 //
 // The ground:
-// - Traffic. Every journey adds its weight to the traffic value of the points it crosses and half
-//   of it to the points beside them. A step onto a point costs less the more often the point has
-//   been trodden, down to half: the roads form themselves.
-// - Security. A household raises the security of the ground round its home; a public building
-//   raises it more.
-// - The value of a location (a square metre) = traffic × security × locationValueScale.
+// - Traffic. Every journey adds its weight to the traffic value of every point within the circle
+//   of influence (so many edges) of the points it crosses. A step onto a point costs less the
+//   more often the point has been trodden, down to half: the roads form themselves.
+// - Security. A household raises the security of the ground within the same circle round its
+//   home; a public building raises it more.
+// - The value of a location (a tile) = traffic × security × tileValueScale.
 // - Two places on the rim are the ways to other towns (cross-border traffic).
 //
-// The two values of a property:
-// - Building value: for each floor, area × the unit cost of its tier × a surcharge for its level.
-//   It is what the floor costs to build, and has to do with the building only.
-// - Property value: for each floor, area × location value × utility. The location value is the
-//   same for the whole parcel; the utility falls with each level up and is lower on a tile that
-//   faces no street.
-// - Land price = property value − building value. Land with nothing on it is valued as if a
-//   standard building stood there; a street costs its price and twice as much again.
+// The two values of a property (the author's table of 2026-10-09):
+// - Construction cost of a tile = the base of its type × the multiplier of its level.
+// - Value of a tile = the value of the location at the entrance cell (the street the tile opens
+//   to; a backward tile: the street its property opens to) × the utility of its level (less on a
+//   backward tile and on a roof terrace) × the bonus of its type and of what its property holds
+//   (a classical portal, a classical top, a garden, a tower). A property is the ground a household
+//   holds in one piece.
+// - Property value = the sum of its tiles, never less than the value of farmland.
+// - Land value = property value − construction cost; vacant ground and streets are valued by the
+//   location itself × a factor (a street much more); never less than the value of farmland.
 //
-// A household's books: rent, 7% of its property value a year (less where its property lies
-// dispersed, far from its home; more beside gardens); tax on the property value; upkeep on the
+// A household's books: rent, a share of its property value a year (less where its property lies
+// dispersed, far from its home); tax on the property value; upkeep on the
 // building value, at a higher rate for classical floors. A farmer has the yield of the farmland,
 // the same for every parcel. Journeys bring no income.
 //
@@ -44,7 +46,10 @@ import { pointsOfPublicBuilding, createCity, runTheCity, householdsWithoutWater,
 // The parameters a settlement is run with, and what they are when nothing else is asked for.
 // (A "day" is one step of the simulation; a year is daysInAYear of them: ASSUMED 360.)
 export const SETTLEMENT_PARAMETER_DEFAULTS = {
-  locationValueScale: 0.003,         // value of a location, a square metre = traffic × security × this
+  // ASSUMED (the table gives no unit of money): the value of a location, for a tile, is
+  // traffic × security × this; a tile of base cost 1 costs costOfABaseTile
+  tileValueScale: 0.007,
+  costOfABaseTile: 256,
   rentShareOfValueEachYear: 0.07,    // the rent of a year, as a share of the property value
   taxShareOfValueEachYear: 0.01,     // the tax of a year, as a share of the property value
   transactionTaxShare: 0.05,         // of the price, paid by the buyer to the city when property changes hands
@@ -53,22 +58,23 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   // ASSUMED (the specification leaves open whether an investment needs a test of its own): it is
   // made only where the rent it adds in a year is at least this share of its cost
   requiredYieldEachYear: 0.03,
-  levelCostGrowth: 1.25,             // each floor up costs so many times the one below
-  upperFloorUtility: 0.8,            // the utility of a floor, for each level it lies above the ground
-  interiorUtility: 0.55,             // the utility of a tile that faces no street
-  // Turning classical: a household gains by its first classical blocks (so many); more of them
-  // cost and keep as dear, but are worth no more than a house
-  distinguishedClassicalBlocks: 2,
-  classicalUtilityBonus: 1.5,
+  backwardTileUtility: 0.7,          // a tile with no street beside it, on top of the utility of its level
+  roofTerraceUtility: 0.3,           // a roof terrace, on top of the utility of its level
+  bonusWithAClassicalPortal: 1.1,    // on the house tiles of a property that has a classical ground floor under a house
+  bonusWithAClassicalTop: 1.1,       // ... that has a classical top floor on a house
+  bonusWithAGarden: 1.15,            // on every tile of a property that has a garden
+  towerBonusForEachLevel: 1.02,      // on every tile of a property with a tower: this × (the tower's levels − levelsBeforeTheTowerBonus)
+  levelsBeforeTheTowerBonus: 6,
+  vacantLandFactor: 1.5,             // vacant ground is worth the value of its location × this
+  streetLandFactor: 6,               // ... and a street × this
+  farmlandValue: 30,                 // ASSUMED: what a point of farmland is worth; no property and no land is worth less
   managementLossPerCell: 0.05,       // the rent of a point falls by this for each cell it lies from its household's home
   acquisitionPremium: 0.3,           // somebody else's property is bought at its value and this much more
-  streetPremium: 2,                  // a street is bought at its price and this many times its price more
-  gardenRentBonus: 0.15,             // a garden adds this to the rent of every property beside it
   startingCapital: 500,              // what a merchant brings
   farmerStartingCapital: 260,        // ... and a farmer: enough for land and a hut
   shareOfFarmers: 0.5,               // of the newcomers
   farmYieldEachDay: 0.06,            // what a farmer takes in a day from each parcel of farmland near it, shared with the other farmers there
-  locationValueOfAMerchant: 60,      // a farmer whose home stands on a location of this value turns merchant
+  locationValueOfAMerchant: 960,      // a farmer whose home stands on a location of this value turns merchant
   daysBetweenInvestmentSearches: 7,
   householdsForEachTower: 150,       // the town has room for one tower (a classical block over three levels) for every so many households
   journeysPerHouseholdEachDay: 0.35,
@@ -83,22 +89,26 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
 Object.assign(SETTLEMENT_PARAMETER_DEFAULTS, CITY_PARAMETER_DEFAULTS); // what the city does as a whole: city.js
 
 const daysInAYear = 360;
-const floorArea = 16;                    // square metres of one floor of a point (a cell is 4 m wide)
-const UNIT_COST_OF_TIER = {              // what a square metre of floor costs to build on the ground
-  [TIER.temporary]: 12, [TIER.vernacular]: 16, [TIER.classical]: 110,
+const floorArea = 16;                    // square metres of one floor of a point (a cell is 4 m wide); only for prices a square metre
+// In a stack a roof terrace is this; the volume holds a house block there and marks the point
+// (volume.roofTerraces), so that the houses are drawn as before.
+const TERRACE = 5;
+// The author's table (2026-10-09). The base cost of a tile by its type ...
+const BASE_COST_OF_TYPE = {
+  [TIER.temporary]: 0.3, [TIER.vernacular]: 1, [TIER.classical]: 3, [TIER.garden]: 0.5, [TERRACE]: 0.3,
 };
-const gardenPrice = 3;                   // a square metre of garden laid out
-// ASSUMED (the specification leaves open whether utility depends on the tier): a hut offers less
-// than a house on the same location. A classical floor offers as much as a house, and the bonus
-// (classicalUtilityBonus) on a household's first classical blocks only.
-const UTILITY_OF_TIER = { [TIER.temporary]: 0.3, [TIER.vernacular]: 1, [TIER.classical]: 1 };
-const STANDARD_BUILDING = [TIER.vernacular, TIER.vernacular]; // what open land is valued by
-const leastLandPrice = 10;               // a parcel of land is never sold for less
+// ... the multiplier of its level (ASSUMED above the sixth: 0.05 more with each level) ...
+const COST_MULTIPLIER_OF_LEVEL = [1, 1.4, 1.2, 1.25, 1.3, 1.35];
+// ... the utility of its level (ASSUMED above the sixth: as the sixth) ...
+const UTILITY_OF_LEVEL = [1, 0.6, 0.5, 0.4, 0.35, 0.3];
+// ... and the bonus of its type
+const BONUS_OF_TYPE = { [TIER.temporary]: 0.7, [TIER.vernacular]: 1, [TIER.classical]: 1.3, [TERRACE]: 1 };
+const influenceEdges = 3;                // the circle of influence of traffic and of security: so many edges
 const MOST_LEVELS_OF_TIER = { [TIER.temporary]: 2, [TIER.vernacular]: 6, [TIER.classical]: 3 };
-const mostLevelsOfATower = 20;
+const mostLevelsOfATower = 15;
 const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 4 };
-const stepsOfASecurityBoost = 3;         // a household raises the security this many steps round its home
-const stepsOfAPublicSecurityBoost = 5;
+const stepsOfASecurityBoost = influenceEdges;       // a household raises the security this many steps round its home
+const stepsOfAPublicSecurityBoost = influenceEdges; // ... and a public building
 const stepsOfFarmland = 5;               // a farmer works the land this many steps round it
 const tradeRouteWeight = 12;
 const JOURNEY_WEIGHT = { farmer: 1, merchant: 2 };
@@ -121,7 +131,8 @@ export function setSettlementParameters(givenParameters) {
   return parametersInUse;
 }
 
-// The tiers of a point from the ground up (empty where nothing stands)
+// The tiers of a point from the ground up (empty where nothing stands); the top of a house that
+// is marked as a roof terrace is TERRACE
 function stackOf(volume, pointIndex) {
   const stack = [];
   for (let level = 0; level < volume.levelCount; level++) {
@@ -131,12 +142,28 @@ function stackOf(volume, pointIndex) {
     }
     stack.push(tier);
   }
+  if (stack.length > 1 && stack[stack.length - 1] === TIER.vernacular && volume.roofTerraces && volume.roofTerraces[pointIndex] === 1) {
+    stack[stack.length - 1] = TERRACE;
+  }
   return stack;
 }
 
-// What it costs to build a floor of a tier at a level
+function costMultiplierOfLevel(level) {
+  const lastLevel = COST_MULTIPLIER_OF_LEVEL.length - 1;
+  return level <= lastLevel ? COST_MULTIPLIER_OF_LEVEL[level] : COST_MULTIPLIER_OF_LEVEL[lastLevel] + 0.05 * (level - lastLevel);
+}
+
+function utilityOfLevel(level) {
+  return UTILITY_OF_LEVEL[Math.min(level, UTILITY_OF_LEVEL.length - 1)];
+}
+
+// What it costs to build a tile of a type at a level: the base of its type × the multiplier of its level
 function floorCost(tier, level) {
-  return floorArea * UNIT_COST_OF_TIER[tier] * Math.pow(parametersInUse.levelCostGrowth, level);
+  return parametersInUse.costOfABaseTile * BASE_COST_OF_TYPE[tier] * costMultiplierOfLevel(level);
+}
+
+function gardenCost() {
+  return parametersInUse.costOfABaseTile * BASE_COST_OF_TYPE[TIER.garden];
 }
 
 // The tier that names a stack: the classical where all of it is, the house where any of it is, else the hut
@@ -205,6 +232,8 @@ export class Settlement {
     this.isKeptOpen = new Uint8Array(pointCount);
     volume.streetGrades = new Uint8Array(pointCount);
     volume.shopFronts = new Map();
+    volume.roofTerraces = new Uint8Array(pointCount);
+    this.circleOfPoint = new Array(pointCount).fill(null); // the points within the circle of influence of each point, as they are asked for
     this.neighboursOfPoint = map.points.map(function (point, pointIndex) {
       return Array.from(map.sideNeighboursOfPoint[pointIndex]);
     });
@@ -266,9 +295,17 @@ export class Settlement {
   // ---------------------------------------------------------------------------
   // Prices and worth
   // ---------------------------------------------------------------------------
-  // The value of a location, a square metre: traffic × security
+  // The value of a location, for a tile: traffic × security
   locationValueAt(pointIndex) {
-    return this.trafficValue[pointIndex] * this.security[pointIndex] * parametersInUse.locationValueScale;
+    return this.trafficValue[pointIndex] * this.security[pointIndex] * parametersInUse.tileValueScale;
+  }
+
+  // The points within the circle of influence of a point
+  circleAt(pointIndex) {
+    if (this.circleOfPoint[pointIndex] === null) {
+      this.circleOfPoint[pointIndex] = this.pointsWithinSteps(pointIndex, influenceEdges);
+    }
+    return this.circleOfPoint[pointIndex];
   }
 
   // Whether a point faces a street (a free point beside it that is used as road)
@@ -279,61 +316,134 @@ export class Settlement {
     });
   }
 
-  // Whether a classical floor on a point brings its household the bonus: only on its first so many
-  // blocks with classical floors (the point itself counted among them)
-  isDistinguished(household, pointIndex) {
+  // The ground a household holds in one piece with a point (the point itself among it, also where
+  // the household does not hold it yet): a property
+  propertyPointsOf(household, pointIndex) {
+    const found = [pointIndex];
     if (!household) {
-      return false;
+      return found;
     }
-    const volume = this.volume;
-    let otherClassicalBlocks = 0;
-    household.pointIndices.forEach(function (otherPoint) {
-      if (otherPoint !== pointIndex && stackOf(volume, otherPoint).indexOf(TIER.classical) >= 0) {
-        otherClassicalBlocks++;
+    const seen = new Set(found);
+    for (let foundIndex = 0; foundIndex < found.length; foundIndex++) {
+      for (const neighbourPoint of this.neighboursOfPoint[found[foundIndex]]) {
+        if (!seen.has(neighbourPoint) && this.ownerOfPoint[neighbourPoint] === household) {
+          seen.add(neighbourPoint);
+          found.push(neighbourPoint);
+        }
       }
-    });
-    return otherClassicalBlocks < parametersInUse.distinguishedClassicalBlocks;
+    }
+    return found;
   }
 
-  // The building value of a stack: each floor its area × the unit cost of its tier × the
-  // surcharge of its level. It has to do with the building only.
+  // The entrance cell of a tile: the street beside its point with the most valuable location; a
+  // backward tile: the best street beside any point of its property; where there is no street
+  // at all yet, the point itself
+  entranceOf(pointIndex, propertyPoints) {
+    const settlement = this;
+    let entrance = -1;
+    let highestValue = -1;
+    function lookBeside(ofPoint) {
+      settlement.neighboursOfPoint[ofPoint].forEach(function (neighbourPoint) {
+        if (settlement.isRoad(neighbourPoint) && settlement.locationValueAt(neighbourPoint) > highestValue) {
+          highestValue = settlement.locationValueAt(neighbourPoint);
+          entrance = neighbourPoint;
+        }
+      });
+    }
+    lookBeside(pointIndex);
+    if (entrance === -1 && propertyPoints) {
+      propertyPoints.forEach(lookBeside);
+    }
+    return entrance === -1 ? pointIndex : entrance;
+  }
+
+  // What a property holds that raises the value of its tiles: stackAt(pointIndex) gives the
+  // stack of each of its points
+  featuresOfProperty(propertyPoints, stackAt) {
+    const features = { hasAClassicalPortal: false, hasAClassicalTop: false, hasAGarden: false, towerLevelCount: 0 };
+    propertyPoints.forEach(function (pointIndex) {
+      const stack = stackAt(pointIndex);
+      if (stack.length === 0) {
+        return;
+      }
+      if (stack[0] === TIER.garden) {
+        features.hasAGarden = true;
+      } else if (stack.every(function (tier) { return tier === TIER.classical; })) {
+        features.towerLevelCount = Math.max(features.towerLevelCount, stack.length);
+      } else if (stack.indexOf(TIER.vernacular) >= 0) {
+        features.hasAClassicalPortal = features.hasAClassicalPortal || stack[0] === TIER.classical;
+        features.hasAClassicalTop = features.hasAClassicalTop || stack[stack.length - 1] === TIER.classical;
+      }
+    });
+    return features;
+  }
+
+  // The bonus of a tile: of its type, and of what its property holds
+  bonusOfTile(tier, features) {
+    const parameters = parametersInUse;
+    let bonus = BONUS_OF_TYPE[tier];
+    if (tier === TIER.vernacular || tier === TERRACE) {
+      bonus *= (features.hasAClassicalPortal ? parameters.bonusWithAClassicalPortal : 1) * (features.hasAClassicalTop ? parameters.bonusWithAClassicalTop : 1);
+    }
+    if (features.hasAGarden) {
+      bonus *= parameters.bonusWithAGarden;
+    }
+    if (features.towerLevelCount > parameters.levelsBeforeTheTowerBonus) {
+      bonus *= parameters.towerBonusForEachLevel * (features.towerLevelCount - parameters.levelsBeforeTheTowerBonus);
+    }
+    return bonus;
+  }
+
+  // The construction cost of a stack: each tile the base of its type × the multiplier of its
+  // level. It has to do with the building only.
   buildingValueOf(stack) {
     let value = 0;
     stack.forEach(function (tier, level) {
-      value += tier === TIER.garden ? floorArea * gardenPrice : floorCost(tier, level);
+      value += tier === TIER.garden ? gardenCost() : floorCost(tier, level);
     });
     return value;
   }
 
-  // The property value of a stack on a point: each floor its area × the value of the location ×
-  // its utility. The utility falls with each level up and is lower on a tile that faces no
-  // street; a hut offers less than a house; a classical floor more only on the first classical
-  // blocks of its household.
-  propertyValueOf(pointIndex, stack, household) {
-    if (stack.length === 0 || stack[0] === TIER.garden) {
+  // The property value of a stack on a point: the sum of its tiles, each the value of the
+  // location at the entrance cell × the utility of its level × its bonus; never less than
+  // farmland. (propertyPoints, features: of the property the point belongs to; found where they
+  // are not given.)
+  propertyValueOf(pointIndex, stack, household, propertyPoints, features) {
+    if (stack.length === 0) {
       return 0;
     }
     const parameters = parametersInUse;
-    const locationValue = this.locationValueAt(pointIndex);
-    const streetUtility = this.facesAStreet(pointIndex) ? 1 : parameters.interiorUtility;
-    const classicalBonus = stack.indexOf(TIER.classical) >= 0 && this.isDistinguished(household, pointIndex) ? parameters.classicalUtilityBonus : 1;
+    if (!propertyPoints) {
+      propertyPoints = this.propertyPointsOf(household, pointIndex);
+    }
+    if (!features) {
+      const volume = this.volume;
+      features = this.featuresOfProperty(propertyPoints, function (otherPoint) {
+        return otherPoint === pointIndex ? stack : stackOf(volume, otherPoint);
+      });
+    }
     let value = 0;
-    stack.forEach(function (tier, level) {
-      const utility = UTILITY_OF_TIER[tier] * (tier === TIER.classical ? classicalBonus : 1) * Math.pow(parameters.upperFloorUtility, level) * streetUtility;
-      value += floorArea * locationValue * utility;
-    });
-    return value;
+    if (stack[0] !== TIER.garden) {
+      const locationValue = this.locationValueAt(this.entranceOf(pointIndex, propertyPoints));
+      const streetUtility = this.facesAStreet(pointIndex) ? 1 : parameters.backwardTileUtility;
+      const settlement = this;
+      stack.forEach(function (tier, level) {
+        value += locationValue * utilityOfLevel(level) * streetUtility * (tier === TERRACE ? parameters.roofTerraceUtility : 1) * settlement.bonusOfTile(tier, features);
+      });
+    }
+    return Math.max(parameters.farmlandValue, value);
   }
 
-  // The land value of a point: its property value less its building value; where nothing stands
-  // (or a garden), as if a standard building stood there. Never less than nothing.
+  // The land value of a point. Built on: its property value less its construction cost. Vacant
+  // (or the city's): the value of its location × a factor, a street much more. Never less than farmland.
   landValueAt(pointIndex) {
+    const parameters = parametersInUse;
     const household = this.ownerOfPoint[pointIndex];
-    let stack = stackOf(this.volume, pointIndex);
-    if (stack.length === 0 || stack[0] === TIER.garden || household === null || household.isCity) {
-      stack = STANDARD_BUILDING;
+    const stack = stackOf(this.volume, pointIndex);
+    if (household === null || household.isCity || stack.length === 0) {
+      return Math.max(parameters.farmlandValue, this.locationValueAt(pointIndex) * (this.isRoad(pointIndex) ? parameters.streetLandFactor : parameters.vacantLandFactor));
     }
-    return Math.max(0, this.propertyValueOf(pointIndex, stack, household && !household.isCity ? household : null) - this.buildingValueOf(stack));
+    return Math.max(parameters.farmlandValue, this.propertyValueOf(pointIndex, stack, household) - this.buildingValueOf(stack));
   }
 
   // The price of land, a square metre: the land value over the footprint
@@ -366,23 +476,30 @@ export class Settlement {
     return 1 / (1 + parametersInUse.managementLossPerCell * cellsAway);
   }
 
-  // How much the gardens beside a point add to its rent
-  gardenFactorAt(pointIndex, exceptPoint) {
-    let gardensBeside = 0;
-    const volume = this.volume;
-    this.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
-      if (neighbourPoint !== exceptPoint && volume.tierAt(neighbourPoint, 0) === TIER.garden) {
-        gardensBeside++;
-      }
-    });
-    return 1 + parametersInUse.gardenRentBonus * Math.min(2, gardensBeside);
+  // The rent of a day of a stack on a point, for a household: the yearly share of its property
+  // value, less where it is managed from afar
+  rentOf(pointIndex, stack, household, propertyPoints, features) {
+    return this.propertyValueOf(pointIndex, stack, household, propertyPoints, features) * parametersInUse.rentShareOfValueEachYear / daysInAYear *
+      this.managementOf(household, pointIndex);
   }
 
-  // The rent of a day of a stack on a point, for a household: the yearly share of its property
-  // value, less where it is managed from afar, more beside gardens
-  rentOf(pointIndex, stack, household) {
-    return this.propertyValueOf(pointIndex, stack, household) * parametersInUse.rentShareOfValueEachYear / daysInAYear *
-      this.managementOf(household, pointIndex) * this.gardenFactorAt(pointIndex, -1);
+  // What a property brings in a day, rent less upkeep: of the points given, the stack of one of
+  // them replaced (changedPoint, changedStack; an empty stack: the point left out)
+  netOfProperty(household, propertyPoints, changedPoint, changedStack) {
+    const settlement = this;
+    const volume = this.volume;
+    function stackAt(pointIndex) {
+      return pointIndex === changedPoint ? changedStack : stackOf(volume, pointIndex);
+    }
+    const features = this.featuresOfProperty(propertyPoints, stackAt);
+    let net = 0;
+    propertyPoints.forEach(function (pointIndex) {
+      const stack = stackAt(pointIndex);
+      if (stack.length > 0) {
+        net += settlement.rentOf(pointIndex, stack, household, propertyPoints, features) - settlement.upkeepOf(stack);
+      }
+    });
+    return net;
   }
 
   rentOfPoint(pointIndex) {
@@ -660,10 +777,9 @@ export class Settlement {
     });
   }
 
-  // What the city asks for a free point: the value of its land; a street its price and twice as much again
+  // What the city asks for a free point: the value of its land (a street is worth much more)
   landPriceToPay(pointIndex) {
-    const price = Math.max(leastLandPrice, this.landValueAt(pointIndex));
-    return this.isRoad(pointIndex) ? price * (1 + parametersInUse.streetPremium) : price;
+    return this.landValueAt(pointIndex);
   }
 
   // ---------------------------------------------------------------------------
@@ -777,8 +893,9 @@ export class Settlement {
     this.volume.setTier(pointIndex, 0, TIER.empty); // takes away what stood there, all of it
     const volume = this.volume;
     stack.forEach(function (tier, level) {
-      volume.setTier(pointIndex, level, tier);
+      volume.setTier(pointIndex, level, tier === TERRACE ? TIER.vernacular : tier);
     });
+    volume.roofTerraces[pointIndex] = stack.length > 0 && stack[stack.length - 1] === TERRACE ? 1 : 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -832,6 +949,11 @@ export class Settlement {
       if (levelCount >= 2) {
         choices.push({ kind: 'classicalTopFloor', stack: stack.concat([TIER.classical]), cost: floorCost(TIER.classical, levelCount) });
       }
+      choices.push({ kind: 'roofTerrace', stack: stack.concat([TERRACE]), cost: floorCost(TERRACE, levelCount) });
+    }
+    if (top === TERRACE) {
+      // a room in the place of the terrace
+      choices.push({ kind: 'roomOverTheTerrace', stack: stack.slice(0, -1).concat([TIER.vernacular]), cost: floorCost(TIER.vernacular, levelCount - 1) });
     }
     if (isAllClassical && (levelCount < MOST_LEVELS_OF_TIER[TIER.classical] ||
       (levelCount < mostLevelsOfATower && (levelCount > 3 || this.mayBeginATower(household))))) {
@@ -878,32 +1000,19 @@ export class Settlement {
         best = option;
       }
     }
-    // what the gardens' bonus on the household's points beside a point is worth in a day: gained
-    // where the point becomes a garden, lost where a garden is built over
-    function gardenBonusBeside(pointIndex) {
-      let rentOfTheBonus = 0;
-      settlement.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
-        if (settlement.ownerOfPoint[neighbourPoint] !== household) {
-          return;
-        }
-        const stack = stackOf(volume, neighbourPoint);
-        const rentWithoutGardens = settlement.propertyValueOf(neighbourPoint, stack, household) * parameters.rentShareOfValueEachYear / daysInAYear *
-          settlement.managementOf(household, neighbourPoint);
-        rentOfTheBonus += rentWithoutGardens * (settlement.gardenFactorAt(neighbourPoint, pointIndex) + parameters.gardenRentBonus - settlement.gardenFactorAt(neighbourPoint, pointIndex));
-      });
-      return rentOfTheBonus;
-    }
-    // its own points: a floor more, a rebuilding, or a garden
+    // its own points: a floor more, a rebuilding, or a garden; each weighed by what the whole
+    // property brings before and after (a portal, a top, a garden, a tower raise the tiles round them)
     household.pointIndices.forEach(function (pointIndex) {
       const stack = stackOf(volume, pointIndex);
-      const isAGarden = stack[0] === TIER.garden;
-      const netNow = settlement.rentOf(pointIndex, stack, household) - settlement.upkeepOf(stack) + (isAGarden ? gardenBonusBeside(pointIndex) : 0);
+      const propertyPoints = settlement.propertyPointsOf(household, pointIndex);
+      const netNow = settlement.netOfProperty(household, propertyPoints, -1, null);
       settlement.buildingChoicesFor(household, stack).forEach(function (choice) {
-        const netAfter = settlement.rentOf(pointIndex, choice.stack, household) - settlement.upkeepOf(choice.stack);
+        const netAfter = settlement.netOfProperty(household, propertyPoints, pointIndex, choice.stack);
         consider({ kind: choice.kind, pointIndex: pointIndex, stack: choice.stack, cost: choice.cost, rentGainedEachDay: netAfter - netNow });
       });
-      if (ownsAHouse && !isAGarden && household.pointIndices.length > 1) {
-        consider({ kind: 'garden', pointIndex: pointIndex, stack: [TIER.garden], cost: floorArea * gardenPrice, rentGainedEachDay: gardenBonusBeside(pointIndex) - netNow });
+      if (ownsAHouse && stack[0] !== TIER.garden && propertyPoints.length > 1) {
+        const netAfter = settlement.netOfProperty(household, propertyPoints, pointIndex, [TIER.garden]);
+        consider({ kind: 'garden', pointIndex: pointIndex, stack: [TIER.garden], cost: gardenCost(), rentGainedEachDay: netAfter - netNow });
       }
     });
     // the ground beside its points, and a few points elsewhere (more of them for a household that holds nothing)
@@ -928,10 +1037,12 @@ export class Settlement {
           return;
         }
         const landCost = settlement.landPriceToPay(pointIndex);
+        const propertyPoints = settlement.propertyPointsOf(household, pointIndex);
+        const netNow = settlement.netOfProperty(household, propertyPoints, pointIndex, []);
         settlement.buildingChoicesFor(household, []).forEach(function (choice) {
           consider({
             kind: 'buyLandAndBuild', pointIndex: pointIndex, stack: choice.stack, cost: landCost + choice.cost,
-            rentGainedEachDay: settlement.rentOf(pointIndex, choice.stack, household) - settlement.upkeepOf(choice.stack),
+            rentGainedEachDay: settlement.netOfProperty(household, propertyPoints, pointIndex, choice.stack) - netNow,
           });
         });
         return;
@@ -943,9 +1054,10 @@ export class Settlement {
       // transaction tax on that to the city
       const stack = stackOf(volume, pointIndex);
       const price = settlement.worthAsParcel(pointIndex) * (1 + parameters.acquisitionPremium);
+      const propertyPoints = settlement.propertyPointsOf(household, pointIndex);
       consider({
         kind: 'acquire', pointIndex: pointIndex, stack: stack, seller: owner, price: price, cost: price * (1 + parameters.transactionTaxShare),
-        rentGainedEachDay: settlement.rentOf(pointIndex, stack, household) - settlement.upkeepOf(stack),
+        rentGainedEachDay: settlement.netOfProperty(household, propertyPoints, pointIndex, stack) - settlement.netOfProperty(household, propertyPoints, pointIndex, []),
       });
     });
     if (best === null) {
@@ -1054,21 +1166,16 @@ export class Settlement {
     return candidates.length > 0 ? candidates[candidates.length - 1] : aVenue();
   }
 
-  // Traffic left along a way: its weight on the points of the way, half of it beside them
+  // Traffic left along a way: on the points of the way, and its weight on the traffic value of
+  // every point within the circle of influence of each of them
   leaveTraffic(points, weight) {
     const settlement = this;
-    const besideTheWay = new Set();
     points.forEach(function (pointIndex) {
       settlement.traffic[pointIndex] += 1;
       settlement.recentTraffic[pointIndex] += 1;
-      settlement.trafficValue[pointIndex] += weight;
-      settlement.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
-        besideTheWay.add(neighbourPoint);
+      settlement.circleAt(pointIndex).forEach(function (nearPoint) {
+        settlement.trafficValue[nearPoint] += weight;
       });
-    });
-    points.forEach(function (pointIndex) { besideTheWay.delete(pointIndex); });
-    besideTheWay.forEach(function (pointIndex) {
-      settlement.trafficValue[pointIndex] += weight * 0.5;
     });
   }
 
@@ -1322,7 +1429,7 @@ export class Settlement {
     if (household === null) {
       const grade = this.volume.streetGrades[pointIndex];
       lines.push(grade === STREET_GRADE.busyStreet ? 'A busy street' : grade === STREET_GRADE.street ? 'A street' : 'Free ground (the city\'s)');
-      lines.push('price of the land: ' + Math.round(this.landPriceToPay(pointIndex)) + (this.isRoad(pointIndex) ? ' (a street: three times its land)' : ''));
+      lines.push('price of the land: ' + Math.round(this.landPriceToPay(pointIndex)) + (this.isRoad(pointIndex) ? ' (a street)' : ''));
     } else if (household.isCity) {
       const building = this.volume.publicBuildings[this.volume.publicBuildingOfPoint[pointIndex] - 1];
       lines.push('The city' + (building ? ': ' + building.kind + ', built on day ' + building.day : ''));
@@ -1333,12 +1440,12 @@ export class Settlement {
       const stack = stackOf(this.volume, pointIndex);
       lines.push('property value ' + Math.round(this.propertyValueOf(pointIndex, stack, household)) + ' = building ' + Math.round(this.buildingValueOf(stack)) +
         ' + land ' + Math.round(this.landValueAt(pointIndex)));
-      lines.push('rent ' + rounded(this.rentOfPoint(pointIndex) * daysInAYear) + ' a year (7% of the value, managed at ' + Math.round(this.managementOf(household, pointIndex) * 100) + '%)' +
+      lines.push('rent ' + rounded(this.rentOfPoint(pointIndex) * daysInAYear) + ' a year (' + Math.round(parametersInUse.rentShareOfValueEachYear * 100) + '% of the value, managed at ' + Math.round(this.managementOf(household, pointIndex) * 100) + '%)' +
         ' · upkeep ' + rounded(this.upkeepOf(stack) * daysInAYear) + ' a year' + (this.facesAStreet(pointIndex) ? ' · faces a street' : ' · faces no street') +
         (household.homePoint === pointIndex ? ' · the home' : ''));
       lines.push('pressure of traffic: ' + Math.round(100 * this.pressure[pointIndex] * parametersInUse.moneyWorthOfAStepSaved / Math.max(1, this.worthAsParcel(pointIndex))) + '% of what breaks it through');
     }
-    lines.push('location: ' + rounded(this.locationValueAt(pointIndex)) + ' a m² = traffic ' + Math.round(this.trafficValue[pointIndex]) + ' × security ' + rounded(this.security[pointIndex]) + ' × ' + parametersInUse.locationValueScale);
+    lines.push('location: ' + rounded(this.locationValueAt(pointIndex)) + ' a tile = traffic ' + Math.round(this.trafficValue[pointIndex]) + ' × security ' + rounded(this.security[pointIndex]) + ' × ' + parametersInUse.tileValueScale);
     lines.push('land price: ' + rounded(this.landPriceAt(pointIndex)) + ' a m² (property value − building value)');
     lines.push('journeys: ' + (Math.round(this.recentTraffic[pointIndex] * 10) / 10) + ' lately, ' + Math.round(this.traffic[pointIndex]) + ' in all');
     const workNames = [];
@@ -1652,6 +1759,7 @@ export class Settlement {
       classicalBlocks: blocksOfKind.classical + blocksOfKind.tower,
       towerBlocks: blocksOfKind.tower,
       gardenPoints: blocksOfKind.garden,
+      roofTerraces: volume.roofTerraces.reduce(function (sum, isTerrace, pointIndex) { return sum + (isTerrace === 1 && stackOf(volume, pointIndex).indexOf(TERRACE) >= 0 ? 1 : 0); }, 0),
       mostLevelsOfABlock: highestBlockLevels,
       meanLevelsOfABlock: rounded(levelsOfAllBlocks / Math.max(1, settledPoints - blocksOfKind.garden)),
       meanLandPriceOfAParcel: rounded(landPriceOfAll / Math.max(1, settledPoints)),
@@ -1700,7 +1808,7 @@ export class Settlement {
       return Array.from(values, function (value) { return Math.round(value * 1000) / 1000; });
     }
     return {
-      economyVersion: 3, seed: this.seed, parameters: this.parameters, dayCount: this.dayCount, randomState: this.random.state,
+      economyVersion: 4, seed: this.seed, parameters: this.parameters, dayCount: this.dayCount, randomState: this.random.state,
       householdCount: this.householdCount, brokenBuildingCount: this.brokenBuildingCount, clearedBuildingCount: this.clearedBuildingCount,
       households: this.households.map(function (household) {
         return {
@@ -1714,7 +1822,7 @@ export class Settlement {
       otherTowns: this.otherTowns.map(function (town) { return town.pointIndices[0]; }),
       isKeptOpen: Array.from(this.isKeptOpen),
       levelCount: this.volume.levelCount, tiers: Array.from(this.volume.tiers), owners: Array.from(this.volume.owners),
-      streetGrades: Array.from(this.volume.streetGrades), shopFronts: shopFronts,
+      streetGrades: Array.from(this.volume.streetGrades), shopFronts: shopFronts, roofTerraces: Array.from(this.volume.roofTerraces),
       works: Array.from(this.volume.works), publicBuildings: this.volume.publicBuildings,
       publicBuildingOfPoint: Array.from(this.volume.publicBuildingOfPoint),
       city: {
@@ -1770,6 +1878,9 @@ export class Settlement {
     volume.tiers.set(saved.tiers);
     volume.owners.set(saved.owners);
     volume.streetGrades.set(saved.streetGrades);
+    if (saved.roofTerraces) {
+      volume.roofTerraces.set(saved.roofTerraces);
+    }
     saved.shopFronts.forEach(function (entry) {
       volume.shopFronts.set(entry[0], new Set(entry[1]));
     });

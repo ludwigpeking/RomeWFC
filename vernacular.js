@@ -111,10 +111,13 @@ function vernacularStyle(volume, houses, seed) {
   function isBlock(pointIndex, level) {
     return volume.tierAt(pointIndex, level) === TIER.vernacular;
   }
-  // a roof terrace: the top storey of a block, on a storey of the house, chosen by its place
+  // a roof terrace: the top storey of a block, on a storey of the house; in a settlement where
+  // the household built one (volume.roofTerraces), otherwise chosen by its place
   function isTerrace(pointIndex, level) {
-    return level >= 1 && isBlock(pointIndex, level) && volume.tierAt(pointIndex, level + 1) === TIER.empty &&
-      isBlock(pointIndex, level - 1) && placeHash(pointIndex, level, seed + 71) < chanceOfARoofTerrace;
+    if (!(level >= 1 && isBlock(pointIndex, level) && volume.tierAt(pointIndex, level + 1) === TIER.empty && isBlock(pointIndex, level - 1))) {
+      return false;
+    }
+    return volume.roofTerraces ? volume.roofTerraces[pointIndex] === 1 : placeHash(pointIndex, level, seed + 71) < chanceOfARoofTerrace;
   }
   // how much the ground of a point is used as street
   function streetGradeAt(pointIndex) {

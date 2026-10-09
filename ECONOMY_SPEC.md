@@ -100,3 +100,35 @@ user found too many huts before the town formalised); each level up × 1.25. A m
 building raises security by 4 over 5 steps (15 over 8 before: temples were too dominant). Tax 1% of the property
 value a year; upkeep 1% of the building value a year, 5% for classical floors; transaction tax 5%.
 Location value scale 0.003. All of these are parameters or constants at the head of settlement.js.
+
+## The value table of 2026-10-09 (the author's, as given; it replaces the numbers above where they differ)
+
+```
+property value = sum(tileValue); minimum = farmland value
+tileValue = trafficValue at entrance cell x securityValue at entrance cell x Utility x BonusMultiplier
+trafficValue = traffic on the path registered to a shorter influence circle (consider 3 edges)
+securityValue = each establishment registered to a shorter influence circle (consider 3 edges)
+Utility: onStreet 1; second floor 0.6; third 0.5; fourth 0.4; fifth 0.35; sixth 0.3;
+         backward tile, no street access x0.7; roof terrace x0.3 (a tile block with its own cost and utility)
+Bonus:   T3 x0.7; T2 x1; T1 x1.3; T2 with T1 portal in property x1.1; T2 with T1 top in property x1.1;
+         with garden in property x1.15; with tower 1.02 x (towerLevel - 6), tower at most 15 levels
+tileConstructionCost = TypeBase x CostLevelMultiplier
+TypeBase: T3 0.3; T2 1; T1 3; garden 0.5; roof terrace 0.3
+CostLevelMultiplier: L1 1; L2 1.4; L3 1.2; L4 1.25; L5 1.3; L6 1.35
+rent = property value x 0.7; tax = property value x 0.1
+landValue = property value - construction value
+landValue of a vacant vertex = traffic x security x 1.5; of a street vertex = traffic x security x 6; minimum = farm value
+```
+
+What the code assumes to run it (ASSUMED in settlement.js):
+- Money: a tile of base cost 1 costs 256; the value of a location, for a tile, = traffic x security x 0.007.
+- Farmland value: 30 a point.
+- Rent 0.7 and tax 0.1: tested both as written (70% and 10% of the value a year) and as 7% and 1%.
+- The tower bonus is taken as written: 1.02 x (levels - 6), so 1.02 at 7 levels and 2.04 at 8.
+- Above the sixth level: cost multiplier 0.05 more with each level; utility as on the sixth.
+- A property is the ground a household holds in one piece; an entrance cell is the street beside a
+  tile with the most valuable location (a backward tile: beside any point of its property).
+- An establishment is a household's home or a public building (both over 3 edges).
+- Kept from before, not in the table: upkeep (1%, classical 5%), management loss, acquisition
+  premium 30%, transaction tax 5%, the 3% yield test. Dropped: the bonus only on a household's
+  first two classical blocks; a garden's 15% on the rent beside it (now: in the property).

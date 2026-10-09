@@ -144,6 +144,7 @@ export class PointVolume {
     this.owners.fill(0);
     this.streetGrades = null;
     this.shopFronts = null;
+    this.roofTerraces = null;
     this.works.fill(0);
     this.publicBuildings = [];
     this.publicBuildingOfPoint.fill(0);
