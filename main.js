@@ -18,7 +18,7 @@ import { buildClassicalTier } from './classical';
 import { latticeViewsOf } from './charts';
 import { buildVernacular } from './vernacular';
 import { buildTemporary } from './temporary';
-import { buildWorks } from './works';
+import { buildWorks, WALL_STYLES, DEFAULT_WALL_STYLE } from './works';
 import { buildGardens } from './gardens';
 import { buildCatalogue, codeOfMonument } from './catalogue';
 import { findCoplanarOverlaps } from './coplanar';
@@ -33,6 +33,7 @@ let largeIrregularRingCount = 8; // rings of the large one: at 8 about as many p
 const levelCount = 22; // a classical tower may rise 20 levels: 100 m
 let map = null;
 let volume = null;
+let chosenWallStyle = DEFAULT_WALL_STYLE; // how the line of the city wall is drawn (works.js)
 let townSeed = 1;
 let brushTier = TIER.classical;
 let showsBareVolume = false;
@@ -165,6 +166,7 @@ function rebuildTown() {
     });
     buildVernacular(collector, volume, townSeed);
     buildTemporary(collector, volume, townSeed);
+    volume.wallStyle = chosenWallStyle;
     buildWorks(collector, volume);
     buildGardens(collector, volume, townSeed);
   }
@@ -790,6 +792,22 @@ document.querySelectorAll('#tabButtons button').forEach(function (button) {
     });
   });
 });
+// the line of the city wall
+(function () {
+  const list = document.getElementById('wallStyleList');
+  WALL_STYLES.forEach(function (styleName) {
+    const option = document.createElement('option');
+    option.value = styleName;
+    option.textContent = wordsOfName(styleName);
+    list.appendChild(option);
+  });
+  list.value = DEFAULT_WALL_STYLE;
+  list.addEventListener('change', function () {
+    chosenWallStyle = this.value;
+    rebuildSettledTown();
+    showDataLayer();
+  });
+})();
 document.getElementById('squareSizeList').addEventListener('change', function () {
   squarePointCount = Number(this.value);
   startMap('square');
@@ -1585,6 +1603,8 @@ window.rome = {
     return settlement.summary();
   },
   rebuild: function () { rebuildSettledTown(); showDataLayer(); return true; },
+  // how the line of the city wall is drawn: one of WALL_STYLES (works.js)
+  setWallStyle: function (styleName) { chosenWallStyle = styleName; document.getElementById('wallStyleList').value = styleName; rebuildSettledTown(); showDataLayer(); return styleName; },
   // a data layer shown: 'traffic', 'streets', 'owners', 'stage', 'money', 'worth', 'pressure' or 'none'
   dataLayer: function (layerName) { dataLayerName = layerName; showDataLayer(); return true; },
   // a new settlement, lived for so many days at once; returns how it stands

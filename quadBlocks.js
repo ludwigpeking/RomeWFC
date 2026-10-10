@@ -25,10 +25,13 @@
 //     fallbackLooks                         tried in order when no arrangement is found
 //   }
 // One roof covers every group of raised points that are open to the sky; it rises with the
-// distance from its eaves, so any outline gets its hips, valleys and ridges.
+// distance from its eaves, so any outline gets its hips, valleys and ridges. The eaves reach
+// out past the walls (roofOverhang), so that the tops of the walls are under the roof.
 
 import { TIER, SeededRandom, placeHash } from './volume';
 import { sideName } from './topology';
+
+const roofOverhang = 0.45; // metres the eaves reach out past the line of the walls
 
 // Every stretch of wall of a tier, with its look collapsed. A stretch is
 // { name, level, start: {x, z}, end: {x, z}, length, raisedPoint, facedPoint, isPartyWall,
@@ -221,7 +224,9 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
     const stepsFromEaves = new Map(); // place name -> half cells in from the eaves
     // a place is on the eaves where the quarters that meet at it are not all under one roof
     const roofAtPlace = new Map();
+    const roofsAtPlace = new Map(); // place name -> every roof (or notRoofed) of the quarters that meet there
     const placesOnEaves = new Set();
+    const placesOnTheRim = new Set();
     for (let pointIndex = 0; pointIndex < volume.pointCount; pointIndex++) {
       const roofOfPoint = roofOf(pointIndex);
       map.quartersOfPoint[pointIndex].forEach(function (quarter) {
@@ -232,9 +237,11 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
         quarter.nodeNames.forEach(function (name) {
           if (!roofAtPlace.has(name)) {
             roofAtPlace.set(name, roofOfPoint);
+            roofsAtPlace.set(name, new Set());
           } else if (roofAtPlace.get(name) !== roofOfPoint) {
             placesOnEaves.add(name);
           }
+          roofsAtPlace.get(name).add(roofOfPoint);
           if (roofOfPoint === notRoofed) {
             placesOnEaves.add(name);
           }
@@ -251,7 +258,9 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
     map.cells.forEach(function (cell) {
       for (let side = 0; side < 4; side++) {
         if (cell.neighbours[side] === null) {
-          placesOnEaves.add(sideName(cell.corners[side], cell.corners[(side + 1) % 4]));
+          const name = sideName(cell.corners[side], cell.corners[(side + 1) % 4]);
+          placesOnEaves.add(name);
+          placesOnTheRim.add(name);
         }
       }
     });
@@ -280,6 +289,45 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
         });
       });
     }
+    // The overhang: a place on the eaves moves out past the walls, away from the point of each
+    // quarter of its roof that meets there (the mean of those directions). Not where another roof
+    // meets it too (the two would lie in each other), nor on the rim of the map, nor at the point
+    // itself.
+    const overhangOfPlace = new Map(); // roof + ':' + place name -> [x, z] of the shift
+    roofedQuarters.forEach(function (quarter) {
+      const roofNumber = roofOf(quarter.pointIndex);
+      const point = map.points[quarter.pointIndex];
+      quarter.nodeNames.forEach(function (name, cornerIndex) {
+        if (cornerIndex === 0 || stepsFromEaves.get(name) !== 0 || placesOnTheRim.has(name)) {
+          return;
+        }
+        let meetsAnotherRoof = false;
+        roofsAtPlace.get(name).forEach(function (otherRoof) {
+          if (otherRoof !== roofNumber && otherRoof !== notRoofed) {
+            meetsAnotherRoof = true;
+          }
+        });
+        if (meetsAnotherRoof) {
+          return;
+        }
+        const corner = quarter.outline[cornerIndex];
+        const distance = Math.hypot(corner[0] - point.x, corner[1] - point.z) || 1;
+        const key = roofNumber + ':' + name;
+        const shift = overhangOfPlace.get(key) || [0, 0];
+        overhangOfPlace.set(key, [shift[0] + (corner[0] - point.x) / distance, shift[1] + (corner[1] - point.z) / distance]);
+      });
+    });
+    overhangOfPlace.forEach(function (shift, key) {
+      const length = Math.hypot(shift[0], shift[1]) || 1;
+      overhangOfPlace.set(key, [shift[0] / length * roofOverhang, shift[1] / length * roofOverhang]);
+    });
+    function outlineWithOverhang(quarter) {
+      const roofNumber = roofOf(quarter.pointIndex);
+      return quarter.outline.map(function (corner, cornerIndex) {
+        const shift = overhangOfPlace.get(roofNumber + ':' + quarter.nodeNames[cornerIndex]);
+        return shift ? [corner[0] + shift[0], corner[1] + shift[1]] : corner;
+      });
+    }
     const coordinates = [];
     // every roof has its own shade of tile: lighter or darker, and from a deep red to a yellower
     // orange (terracotta is nearly all red, so the shade is turned by its green and blue); the
@@ -291,7 +339,8 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
       // and a lighter shade would hardly be seen)
       const brightness = 1 - 0.45 * placeHash(roofNumber, level, 31) - 0.08 * placeHash(quarter.pointIndex, level, 37);
       const yellowness = 0.7 * (placeHash(roofNumber, level, 41) - 0.5);
-      const corners = quarter.outline.map(function (corner, index) {
+      const outline = outlineWithOverhang(quarter);
+      const corners = outline.map(function (corner, index) {
         const steps = stepsFromEaves.get(quarter.nodeNames[index]);
         return [corner[0], quarter.eavesY + (Number.isFinite(steps) ? steps : 0) * roofRisePerCell / 2, corner[1]];
       });
@@ -305,8 +354,8 @@ export function buildRoofs(collector, volume, isBlock, roofRisePerCell, building
           tints.push(brightness, brightness * (1 + yellowness), brightness * (1 + 1.4 * yellowness));
         });
       });
-      // the ceiling under the roof, which also closes the eaves
-      collector.polygonPrism('stoneShade', quarter.outline, quarter.eavesY - 0.14, 0.14);
+      // the ceiling under the roof, which also closes the eaves (out to the overhang)
+      collector.polygonPrism('stoneShade', outline, quarter.eavesY - 0.14, 0.14);
     });
     collector.addTriangles('tile', coordinates, tints);
   }
