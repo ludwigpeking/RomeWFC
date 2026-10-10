@@ -1623,6 +1623,18 @@ window.rome = {
     return settlement.summary();
   },
   rebuild: function () { rebuildSettledTown(); showDataLayer(); return true; },
+  // the settlement as it stands, as a run the app can load again (tools/test_runs.js saves it)
+  saveRun: function () {
+    const monumentNames = rebuildSettledTown();
+    const countOfMonument = {};
+    monumentNames.forEach(function (name) {
+      countOfMonument[name] = (countOfMonument[name] || 0) + 1;
+    });
+    return {
+      statistics: settlement.statistics(), monuments: countOfMonument, parameters: settlement.parameters, saved: settlement.save(),
+      groundSize: { squarePointCount: squarePointCount, largeIrregularRingCount: largeIrregularRingCount }, ground: currentMapKind, seed: settlement.seed,
+    };
+  },
   // for pictures: the houses with a classical ground floor, each with the free point before it
   // (where a camera may stand): [{ x, z, streetX, streetZ }]
   portalsOfTheTown: function () {

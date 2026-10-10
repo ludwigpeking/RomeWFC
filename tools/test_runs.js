@@ -1,14 +1,15 @@
-// Test runs of the settlement with a snapshot every so many days, with headless Chrome driving a
-// built copy of the app (npx vite build --base ./ --outDir dist):
-//   node tools/test_runs.js [runName ...]
+// Test runs of the settlement with so many snapshots over its days, with headless Chrome driving
+// a built copy of the app (npx vite build --base ./ --outDir dist):
+//   node tools/test_runs.js [runName ...]      (--index: only the page of what is on the disk)
 // Every run lives its days with nothing drawn; at each snapshot the town is drawn and
 // photographed from one fixed place, once as it is and once under each data layer asked for,
-// and its numbers are taken:
-//   tools/tests/<run>/<layer>/day_00050.jpg ...
+// and its numbers are taken; at the end the town is saved as a run the app can load:
+//   tools/tests/<run>/<layer>/day_00150.jpg ...
 //   tools/tests/<run>/numbers.jsonl      one line for each snapshot: day, numbers, what the city did
 //   tools/tests/index.html               the snapshots of all runs side by side, day by day
+//   tools/runs/<run>.json                the town at its last day (and index.json, the list for the app)
 // Settings by the environment: ROME_PAGE_ADDRESS (default: dist next to tools),
-// ROME_DEBUGGING_PORT, ROME_TEST_DAYS (default 3000), ROME_DAYS_BETWEEN_SNAPSHOTS (default 50).
+// ROME_DEBUGGING_PORT, ROME_TEST_DAYS (default 3000), ROME_FRAME_COUNT (snapshots, default 20).
 "use strict";
 
 const fs = require("fs");
@@ -20,18 +21,39 @@ const PROJECT_FOLDER = path.join(__dirname, "..");
 const TEST_FOLDER = path.join(__dirname, "tests");
 const PAGE_ADDRESS = process.env.ROME_PAGE_ADDRESS || "file://" + path.join(PROJECT_FOLDER, "dist", "index.html");
 const DEBUGGING_PORT = Number(process.env.ROME_DEBUGGING_PORT || 9420);
+const RUN_FOLDER = path.join(__dirname, "runs");
 const DAY_COUNT = Number(process.env.ROME_TEST_DAYS || 3000);
-const DAYS_BETWEEN_SNAPSHOTS = Number(process.env.ROME_DAYS_BETWEEN_SNAPSHOTS || 50);
+const FRAME_COUNT = Number(process.env.ROME_FRAME_COUNT || 20);
+const DAYS_BETWEEN_SNAPSHOTS = Math.max(1, Math.round(DAY_COUNT / FRAME_COUNT));
 const PICTURE_WIDTH = 1280;
 const PICTURE_HEIGHT = 720;
 const LAYERS = ["none", "location", "height"];
 const CAMERA = { angle: 0.6, distance: 2.3, elevation: 0.62, fieldOfView: 30 };
 
-// The runs: the parameters the app starts with (rent 7% and tax 1% of the value a year), on both grounds
+// The runs: the parameters the app starts with, on both grounds, several seeds
 const RUNS = {
-  square: { ground: "square", seed: 3001, pointsAlongASide: 60, ringCount: 14, parameters: {} },
-  irregular: { ground: "largeIrregular", seed: 3002, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_square_4001: { ground: "square", seed: 4001, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_square_4002: { ground: "square", seed: 4002, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_irregular_4003: { ground: "largeIrregular", seed: 4003, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_irregular_4004: { ground: "largeIrregular", seed: 4004, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_square_4005: { ground: "square", seed: 4005, pointsAlongASide: 80, ringCount: 18, parameters: {} },
 };
+
+// The list of the runs for the app: every run on the disk, the simulations first
+function writeRunIndex() {
+  const savedRuns = fs.readdirSync(RUN_FOLDER).filter(function (fileName) {
+    return /^[a-z]+_[a-z0-9_]+\.json$/.test(fileName) && fileName !== "index.json";
+  }).sort(function (first, second) {
+    const firstRank = first.startsWith("sim_") ? 0 : first.startsWith("test_") ? 1 : 2;
+    const secondRank = second.startsWith("sim_") ? 0 : second.startsWith("test_") ? 1 : 2;
+    return firstRank - secondRank || first.localeCompare(second);
+  }).map(function (fileName) {
+    const run = JSON.parse(fs.readFileSync(path.join(RUN_FOLDER, fileName), "utf8"));
+    return { file: fileName, label: run.label };
+  });
+  fs.writeFileSync(path.join(RUN_FOLDER, "index.json"), JSON.stringify(savedRuns, null, 1));
+  return savedRuns.length;
+}
 
 function wait(milliseconds) {
   return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
@@ -157,6 +179,7 @@ show();
 async function main() {
   if (process.argv[2] === "--index") {
     writeIndexPage();
+    console.log(writeRunIndex() + " runs listed in tools/runs/index.json");
     return;
   }
   const runNames = process.argv.length > 2 ? process.argv.slice(2) : Object.keys(RUNS);
@@ -250,9 +273,20 @@ async function main() {
         }
       }
       await new Promise(function (resolve) { numbersLog.end(resolve); });
-      console.log(runName + " done in " + Math.round((Date.now() - startTime) / 60000) + " min");
+      // the town at its last day, saved for the app
+      const result = await evaluate("rome.saveRun()");
+      const statistics = result.statistics;
+      const label = runName + " \u00b7 seed " + run.seed + " \u00b7 " + (run.ground === "square" ? "square " + run.pointsAlongASide : "irregular " + run.ringCount) +
+        " \u00b7 day " + DAY_COUNT + " \u00b7 " + statistics.households + " households \u00b7 " + statistics.towerBlocks + " towers";
+      fs.mkdirSync(RUN_FOLDER, { recursive: true });
+      fs.writeFileSync(path.join(RUN_FOLDER, runName + ".json"), JSON.stringify({
+        name: runName, label: label, ground: run.ground, seed: run.seed, dayCount: DAY_COUNT, parameters: result.parameters,
+        statistics: statistics, monuments: result.monuments, groundSize: result.groundSize, saved: result.saved,
+      }));
+      console.log(runName + " done in " + Math.round((Date.now() - startTime) / 60000) + " min; saved as tools/runs/" + runName + ".json");
     }
     writeIndexPage();
+    writeRunIndex();
   } finally {
     if (socket !== null) {
       socket.close();
