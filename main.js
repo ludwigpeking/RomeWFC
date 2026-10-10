@@ -1603,6 +1603,23 @@ window.rome = {
     return settlement.summary();
   },
   rebuild: function () { rebuildSettledTown(); showDataLayer(); return true; },
+  // for pictures: the houses with a classical ground floor, each with the free point before it
+  // (where a camera may stand): [{ x, z, streetX, streetZ }]
+  portalsOfTheTown: function () {
+    const found = [];
+    for (let pointIndex = 0; pointIndex < volume.pointCount && found.length < 40; pointIndex++) {
+      if (volume.tierAt(pointIndex, 0) !== TIER.classical || volume.tierAt(pointIndex, 1) !== TIER.vernacular || volume.publicBuildingOfPoint[pointIndex] !== 0) {
+        continue;
+      }
+      const street = Array.from(map.sideNeighboursOfPoint[pointIndex]).find(function (neighbourPoint) {
+        return volume.tierAt(neighbourPoint, 0) === TIER.empty && (settlement === null || settlement.isRoad(neighbourPoint));
+      });
+      if (street !== undefined) {
+        found.push({ x: map.points[pointIndex].x, z: map.points[pointIndex].z, streetX: map.points[street].x, streetZ: map.points[street].z });
+      }
+    }
+    return found;
+  },
   // how the line of the city wall is drawn: one of WALL_STYLES (works.js)
   setWallStyle: function (styleName) { chosenWallStyle = styleName; document.getElementById('wallStyleList').value = styleName; rebuildSettledTown(); showDataLayer(); return styleName; },
   // a data layer shown: 'traffic', 'streets', 'owners', 'stage', 'money', 'worth', 'pressure' or 'none'

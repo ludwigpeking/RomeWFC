@@ -157,3 +157,7 @@ What the code assumes to run it (ASSUMED in settlement.js):
   floor of a house is a closed portal; (7) garden bonus 0.08 a cell up to 10, 0.01 beyond; (8) the
   bonus of a classical top floor 1.15; (9) no aqueduct on a monument's ground, before it or on the
   ring round it; one that ran there is cut and led anew when the monument is built.
+- 2026-10-09 (the author): "the first settlement of a household should be free, allowing it to
+  choose the most desirable unoccupied land": a newcomer pays nothing for its first point and takes
+  the best free point of the whole map (a merchant by location value, a farmer by farmland). A
+  farmer now arrives with 150 (ASSUMED), less than a house costs, so that it still begins in a hut.

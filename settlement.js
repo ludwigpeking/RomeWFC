@@ -75,7 +75,7 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   managementLossPerCell: 0.05,       // the rent of a point falls by this for each cell it lies from its household's home
   acquisitionPremium: 0.4,           // somebody else's property is bought at its value and this much more (so that vacant land is the better buy)
   startingCapital: 500,              // what a merchant brings
-  farmerStartingCapital: 260,        // ... and a farmer: enough for land and a hut
+  farmerStartingCapital: 150,        // ... and a farmer: a hut (less than a house costs, now that the first ground is free)
   shareOfFarmers: 0.5,               // of the newcomers
   farmYieldEachDay: 0.06,            // what a farmer takes in a day from each parcel of farmland near it, shared with the other farmers there
   locationValueOfAMerchant: 960,      // a farmer whose home stands on a location of this value turns merchant
@@ -809,35 +809,22 @@ export class Settlement {
   // ---------------------------------------------------------------------------
   // Newcomers
   // ---------------------------------------------------------------------------
-  // A newcomer: a farmer or a merchant. It looks at some free places near the town (and a few
-  // anywhere) and settles where it does best and can pay for the land and a hut.
+  // A newcomer: a farmer or a merchant. Its first ground is free (the author, 2026-10-09): it
+  // takes the most desirable unoccupied point of the whole map, a merchant the most valuable
+  // location, a farmer the best farmland (free land near, few farmers, some security).
   settleANewHousehold() {
     const parameters = parametersInUse;
     const livelihood = this.households.length === 0 || this.random.nextFloat() >= parameters.shareOfFarmers ? 'merchant' : 'farmer';
     const capital = livelihood === 'farmer' ? parameters.farmerStartingCapital : parameters.startingCapital;
-    const hutCost = floorCost(TIER.temporary, 0);
     let site = -1;
     if (this.households.length === 0) {
       site = this.middlePoint;
     } else {
       let bestValue = -Infinity;
-      for (let attempt = 0; attempt < 40; attempt++) {
-        let candidate = -1;
-        if (attempt % 5 === 4) {
-          candidate = this.random.nextInt(this.map.points.length);
-        } else {
-          const host = this.households[this.random.nextInt(this.households.length)];
-          candidate = host.pointIndices[this.random.nextInt(host.pointIndices.length)];
-          const stepCount = 1 + this.random.nextInt(livelihood === 'farmer' ? 6 : 3);
-          for (let step = 0; step < stepCount; step++) {
-            const neighbours = this.neighboursOfPoint[candidate];
-            candidate = neighbours[this.random.nextInt(neighbours.length)];
-          }
-        }
-        if (!this.mayTake(candidate, false) || this.landPriceToPay(candidate) + hutCost > capital) {
+      for (let candidate = 0; candidate < this.map.points.length; candidate++) {
+        if (!this.mayTake(candidate, false)) {
           continue;
         }
-        // a farmer: farmland near, few farmers, some security; a merchant: the most valuable location it can pay
         const value = livelihood === 'farmer'
           ? this.farmlandShareAt(candidate) * Math.sqrt(this.security[candidate])
           : this.locationValueAt(candidate);
@@ -858,7 +845,7 @@ export class Settlement {
       dayOfNextSearch: this.dayCount + 1 + this.random.nextInt(parameters.daysBetweenInvestmentSearches),
     };
     this.households.push(household);
-    this.buyLand(site, household);
+    this.givePoint(site, household); // (the first ground is free)
     // it builds what it can pay for: a house where the money reaches, a hut otherwise
     const firstTier = household.money >= floorCost(TIER.vernacular, 0) ? TIER.vernacular : TIER.temporary;
     this.buildOnPoint(site, [firstTier]);
