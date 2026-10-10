@@ -148,3 +148,12 @@ What the code assumes to run it (ASSUMED in settlement.js):
   publicWorksCostScale (ASSUMED 6: temple 9,000, arch 7,200, basilica 18,000, theatre 24,000,
   amphitheatre 42,000, pantheon 48,000, circus 54,000, fountain 2,400, a point of aqueduct 360,
   of wall 300).
+- 2026-10-09, nine points from the author: (1) the arch stands over the busiest street (of the
+  places within 90% of the busiest, the cheapest), and the street goes on through it; (2) a temple
+  or basilica at the busiest front (within 70% of the busiest), clearing whatever stands there;
+  (3) vacant land cheaper (location x 1.0, a street x 4) and the premium on another's property 40%,
+  so that land is the better buy; (4) a tower at most 10 levels; (5) an aqueduct led in anew over
+  the rim costs moneyForANewAqueductSource (2,500, x the works scale) more; (6) the classical ground
+  floor of a house is a closed portal; (7) garden bonus 0.08 a cell up to 10, 0.01 beyond; (8) the
+  bonus of a classical top floor 1.15; (9) no aqueduct on a monument's ground, before it or on the
+  ring round it; one that ran there is cut and led anew when the monument is built.

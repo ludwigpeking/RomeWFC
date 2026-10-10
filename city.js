@@ -51,6 +51,7 @@ export const CITY_PARAMETER_DEFAULTS = {
   publicWorksCostScale: 6,
   moneyForAWallPoint: 50,
   moneyForADuctPoint: 60,
+  moneyForANewAqueductSource: 2500,        // where an aqueduct is led in anew over the rim of the map (so that few are)
   moneyForAFountain: 400,
   moneyForEachMetreFromTheCentre: 12,      // what a site further from the middle of the town counts as costing
 };
@@ -227,10 +228,35 @@ function buildAPublicBuildingIfDue(settlement) {
     (settlement.hasAWall ? (settlement.isWithinWalls[firstPointOfIt] ? 'within the walls' : 'outside the walls') : 'before there was a wall') +
     '; clearing its site cost ' + Math.round(site.moneyForClearing) +
     (namesOfTheCleared.size > 0 ? ' (paid to ' + Array.from(namesOfTheCleared).join(', ') + ')' : ''));
+  // the aqueduct keeps its distance from it: where it ran through the ground the building keeps
+  // clear, it is cut and led anew
+  groundKeptClearOfTheAqueduct(settlement, volume.publicBuildings[volume.publicBuildings.length - 1]).forEach(function (pointIndex) {
+    if (volume.works[pointIndex] & WORK.duct) {
+      volume.works[pointIndex] &= ~WORK.duct;
+      aqueductIsCut = true;
+    }
+  });
   if (aqueductIsCut) {
     leadTheAqueductsAnew(settlement);
   }
   return true;
+}
+
+// The ground a public building keeps clear of the aqueduct: its own points, the ground it keeps
+// open before it, and the ring of points round both
+function groundKeptClearOfTheAqueduct(settlement, building) {
+  const map = settlement.map;
+  const kept = new Set();
+  const own = building.pointIndices.concat(building.openPoints || []);
+  if (building.grid) {
+    building.grid.forEach(function (row) { row.forEach(function (pointIndex) { own.push(pointIndex); }); });
+  }
+  own.forEach(function (pointIndex) {
+    kept.add(pointIndex);
+    map.sideNeighboursOfPoint[pointIndex].forEach(function (neighbourPoint) { kept.add(neighbourPoint); });
+  });
+  // a fountain keeps its water: never cut
+  return Array.from(kept).filter(function (pointIndex) { return (settlement.volume.works[pointIndex] & WORK.fountain) === 0; });
 }
 
 // Every place a building fits (a patch of the grid of its size with a ring of points round it,
@@ -263,7 +289,11 @@ function findTheCheapestSite(settlement, wanted) {
   if (wanted.standsFreeOfTheGrid) {
     return findTheCheapestFreeSite(settlement, wanted, mustBeWithinTheWalls, moneyForItsDistance);
   }
-  let best = null;
+  // Every place it fits, with what clearing it costs and the traffic it would stand at: the arch
+  // over the busiest street, a temple or a basilica at the busiest front; of the places within
+  // trafficShareThatCounts of the busiest, the cheapest is taken.
+  const candidates = [];
+  const trafficShareThatCounts = wanted.standsOverABusyStreet ? 0.9 : 0.7;
   for (let firstPoint = 0; firstPoint < map.points.length; firstPoint++) {
     for (const secondPoint of map.sideNeighboursOfPoint[firstPoint]) {
       const grid = latticePatch(map, firstPoint, secondPoint, wanted.widthPoints + 2, wanted.depthPoints + 2);
@@ -271,6 +301,7 @@ function findTheCheapestSite(settlement, wanted) {
         continue;
       }
       let moneyForClearing = 0;
+      let traffic = 0;
       let sumX = 0;
       let sumZ = 0;
       for (let row = 0; row < wanted.depthPoints && moneyForClearing < Infinity; row++) {
@@ -286,6 +317,7 @@ function findTheCheapestSite(settlement, wanted) {
               volume.publicBuildingOfPoint[pointIndex] !== 0 || !goesOn) {
               moneyForClearing = Infinity;
             }
+            traffic += settlement.recentTraffic[pointIndex];
           } else if (mustBeWithinTheWalls && !settlement.isWithinWalls[pointIndex]) {
             moneyForClearing = Infinity;
           } else {
@@ -305,6 +337,7 @@ function findTheCheapestSite(settlement, wanted) {
           } else if (household !== null) {
             moneyForClearing += settlement.worthAsParcel(pointIndex);
           }
+          traffic += settlement.recentTraffic[pointIndex];
         }
       }
       if (moneyForClearing === Infinity) {
@@ -312,11 +345,17 @@ function findTheCheapestSite(settlement, wanted) {
       }
       const pointCount = wanted.widthPoints * wanted.depthPoints;
       const price = moneyForClearing + moneyForItsDistance(sumX / pointCount, sumZ / pointCount);
-      if (best === null || price < best.price) {
-        best = { grid: grid, moneyForClearing: moneyForClearing, price: price };
-      }
+      candidates.push({ grid: grid, moneyForClearing: moneyForClearing, price: price, traffic: traffic });
     }
   }
+  let best = null;
+  let busiest = 0;
+  candidates.forEach(function (candidate) { busiest = Math.max(busiest, candidate.traffic); });
+  candidates.forEach(function (candidate) {
+    if (candidate.traffic >= trafficShareThatCounts * busiest && (best === null || candidate.price < best.price)) {
+      best = candidate;
+    }
+  });
   // one that follows the grid but finds no patch of it (on the irregular ground the patches are
   // small) is placed free of it, whole; not the arch, which needs its street
   if (best === null && !wanted.standsOverABusyStreet) {
@@ -553,22 +592,22 @@ function findTheRouteOfTheAqueduct(settlement, site) {
   const costTo = new Float64Array(pointCount).fill(Infinity);
   const cameFrom = new Int32Array(pointCount).fill(-1);
   const isSettled = new Uint8Array(pointCount);
-  // the arch of the city is not to be hidden: no aqueduct on its points nor on the ring round them
-  const isBesideTheArch = new Uint8Array(pointCount);
+  // the monuments are not to be hidden: no aqueduct on their points, before them, nor on the ring round them
+  const isKeptClear = new Uint8Array(pointCount);
   volume.publicBuildings.forEach(function (building) {
-    if (building.kind === 'cityArch' && building.grid) {
-      building.grid.forEach(function (row) {
-        row.forEach(function (pointIndex) { isBesideTheArch[pointIndex] = 1; });
-      });
-    }
+    groundKeptClearOfTheAqueduct(settlement, building).forEach(function (pointIndex) { isKeptClear[pointIndex] = 1; });
   });
+  const moneyForANewSource = settlement.parameters.moneyForANewAqueductSource;
   function moneyToPass(pointIndex) {
-    if (isBesideTheArch[pointIndex]) {
-      return Infinity;
-    }
     const works = volume.works[pointIndex];
     if (works & WORK.duct) {
       return 0;
+    }
+    if (isKeptClear[pointIndex]) {
+      return Infinity;
+    }
+    if (map.points[pointIndex].isOnBoundary) {
+      return moneyForADuctPoint + moneyForANewSource; // led in anew over the rim: a source of its own
     }
     const household = settlement.ownerOfPoint[pointIndex];
     if ((works & (WORK.fountain | WORK.passage)) || volume.publicBuildingOfPoint[pointIndex] !== 0 || (household !== null && household.isCity)) {

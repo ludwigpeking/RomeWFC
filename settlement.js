@@ -61,19 +61,19 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   backwardTileUtility: 0.7,          // a tile with no street beside it, on top of the utility of its level
   roofTerraceUtility: 0.3,           // a roof terrace, on top of the utility of its level
   bonusWithAClassicalPortal: 1.1,    // on the house tiles of a property that has a classical ground floor under a house
-  bonusWithAClassicalTop: 1.1,       // ... that has a classical top floor on a house
+  bonusWithAClassicalTop: 1.15,      // ... that has a classical top floor on a house (a little more than the portal: a top floor serves fewer tiles)
   // the garden of a property raises every tile of it: this much for each cell of garden up to so
   // many cells, and only this much for each cell beyond (a garden too large adds little more)
-  gardenBonusForEachCell: 0.03,
+  gardenBonusForEachCell: 0.08,
   gardenCellsWithFullBonus: 10,
-  gardenBonusForEachCellBeyond: 0.003,
+  gardenBonusForEachCellBeyond: 0.01,
   towerBonusForEachLevel: 1.02,      // on every tile of a property with a tower: this × (the tower's levels − levelsBeforeTheTowerBonus)
   levelsBeforeTheTowerBonus: 6,
-  vacantLandFactor: 1.5,             // vacant ground is worth the value of its location × this
-  streetLandFactor: 6,               // ... and a street × this
+  vacantLandFactor: 1.0,             // vacant ground is worth the value of its location × this (1.5 until 2026-10-09: too dear to buy)
+  streetLandFactor: 4,               // ... and a street × this
   farmlandValue: 30,                 // ASSUMED: what a point of farmland is worth; no property and no land is worth less
   managementLossPerCell: 0.05,       // the rent of a point falls by this for each cell it lies from its household's home
-  acquisitionPremium: 0.3,           // somebody else's property is bought at its value and this much more
+  acquisitionPremium: 0.4,           // somebody else's property is bought at its value and this much more (so that vacant land is the better buy)
   startingCapital: 500,              // what a merchant brings
   farmerStartingCapital: 260,        // ... and a farmer: enough for land and a hut
   shareOfFarmers: 0.5,               // of the newcomers
@@ -115,7 +115,7 @@ const UTILITY_OF_LEVEL = [1, 0.6, 0.5, 0.4, 0.35, 0.3];
 const BONUS_OF_TYPE = { [TIER.temporary]: 0.7, [TIER.vernacular]: 1, [TIER.classical]: 1.3, [TERRACE]: 1 };
 const influenceEdges = 3;                // the circle of influence of traffic and of security: so many edges
 const MOST_LEVELS_OF_TIER = { [TIER.temporary]: 2, [TIER.vernacular]: 6, [TIER.classical]: 3 };
-const mostLevelsOfATower = 15;
+const mostLevelsOfATower = 10;
 const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 4 };
 const stepsOfASecurityBoost = influenceEdges;       // a household raises the security this many steps round its home
 const stepsOfAPublicSecurityBoost = influenceEdges; // ... and a public building
@@ -1300,6 +1300,9 @@ export class Settlement {
       const works = settlement.volume.works[pointIndex];
       if ((works & WORK.wall) !== 0 || (works & WORK.fountain) !== 0) {
         return false;
+      }
+      if ((works & WORK.passage) !== 0) {
+        return true; // the street goes on through the arch
       }
       const owner = settlement.ownerOfPoint[pointIndex];
       if (owner !== null && owner.isCity) {

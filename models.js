@@ -124,6 +124,14 @@ function buildStoa(collector, depthPoints) {
   gableRoof(collector, cellSize + 2 * outreach, depthPoints * cellSize + 2 * outreach, classicalLevelHeight);
 }
 
+// The classical ground floor of a house (the portal): closed walls with engaged pilasters, an
+// arched door on every point of the front, arched windows at the back; it carries the house
+// above, so its walls are walls, not a colonnade
+function buildPortal(collector) {
+  buildStoreys(collector, 2, 2, true, [{ structureOf: function (side) { return side === 0 ? 'arch' : side === 2 ? 'archWindow' : 'pillarOnWall'; } }]);
+  hippedRoof(collector, 2, 2, classicalLevelHeight);
+}
+
 // Two by two points on one level: an open pavilion of arches under a pointed roof
 function buildPavilion(collector) {
   buildStoreys(collector, 2, 2, false, [{ structureOf: everywhere('arch') }]);
@@ -256,6 +264,14 @@ export const MODELS = [
     sizeText: '1 × 2 × 3',
   },
   {
+    name: 'portal', widthPoints: 2, depthPoints: 2, levelCount: 1, repeat: { across: 1, along: 1, up: null },
+    build: buildPortal,
+    buildRoofFor: function (collector, widthPoints, depthPoints) { hippedRoof(collector, widthPoints, depthPoints, 0); },
+    fits: function () { return false; },
+    fitsOnAHouse: function (width, depth, height) { return height === 1; },
+    sizeText: 'any box of one level under a house',
+  },
+  {
     name: 'stoa', widthPoints: 1, depthPoints: 3, levelCount: 1, repeat: { across: null, along: 2, up: null },
     build: function (collector) { buildStoa(collector, 3); },
     fits: function (width, depth, height) { return width === 1 && depth >= 3 && height === 1; },
@@ -348,7 +364,7 @@ export const MODELS = [
 // The model for a box of classical points, by its size (width the shorter side).
 // placeInAHouse: 'on' where the box stands on a roof (of a house or of another classical
 // building): there it is a roof tower, closed, with small windows. 'under' where it carries a
-// house: there it is a stoa, a loggia or a tower, open to the street. '' where it stands free.
+// house: there it is a portal (one level: closed walls, doors on the front) or a tower. '' where it stands free.
 // isOwned: the box belongs to households, whose blocks never make a triumphal arch: that is for
 // the city. chance: a number from 0 to 1 that stays with the box, for the models that are
 // taken only now and then (chanceOnARoof).
