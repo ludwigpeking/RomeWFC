@@ -167,3 +167,9 @@ What the code assumes to run it (ASSUMED in settlement.js):
   first; the basilica is the tall one (3 x 5, three levels); the square before a public building
   (every point within two edges of its front) is cleared and kept open; the free ground is
   farmland until it becomes parcels and streets.
+- 2026-10-10, found while testing: the city went bankrupt on forced demolitions (a household with
+  no way out: the city opens the cheapest building, the point was bought again, and so on; 1.4M by
+  day 2,400). Now a passage the city opens stays open for good (isAGuaranteedPassage), and ground
+  may be taken only where it and every building beside it keep free ground that reaches a road
+  within six steps. The city's spending is kept by cause (spentOn: public buildings, their sites,
+  the squares, the aqueduct, the wall and its clearing, forced and pressure demolitions).

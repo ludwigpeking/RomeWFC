@@ -85,7 +85,7 @@ const daysBeforeAFailedSearchIsRepeated = 150;
 // on the points of its buildings, so that nobody else builds or walks there.
 export function createCity() {
   // chronicle: what the city has built, in the order it did: [{ day, text }]
-  return { isCity: true, number: 0, pointIndices: [], money: 0, stage: 0, fountainPoints: [], moneyCollected: 0, moneySpent: 0, chronicle: [], dayOfNextSearch: {} };
+  return { isCity: true, number: 0, pointIndices: [], money: 0, stage: 0, fountainPoints: [], moneyCollected: 0, moneySpent: 0, spentOn: {}, chronicle: [], dayOfNextSearch: {} };
 }
 
 // One day of the city: the tax, and every few days perhaps one thing built. Returns whether the
@@ -102,20 +102,22 @@ function writeInTheChronicle(settlement, text) {
   settlement.city.chronicle.push({ day: settlement.dayCount, text: text });
 }
 
-function spend(settlement, money) {
+// cause: what the money went on (the city keeps the sum of each: spentOn)
+function spend(settlement, money, cause) {
   settlement.city.money -= money;
   settlement.city.moneySpent += money;
+  settlement.city.spentOn[cause || 'other'] = (settlement.city.spentOn[cause || 'other'] || 0) + money;
 }
 
 // What stands on a point is cleared away for the city, its household paid its worth
-function clearForTheCity(settlement, pointIndex) {
+function clearForTheCity(settlement, pointIndex, cause) {
   const household = settlement.ownerOfPoint[pointIndex];
   if (household === null || household.isCity) {
     return;
   }
   const worth = settlement.worthAsParcel(pointIndex);
   household.money += worth;
-  spend(settlement, worth);
+  spend(settlement, worth, cause || 'clearing', 'other');
   settlement.takePoint(pointIndex);
   settlement.volume.setTier(pointIndex, 0, TIER.empty);
   settlement.pressure[pointIndex] = 0;
@@ -202,7 +204,7 @@ function buildAPublicBuildingIfDue(settlement) {
     if (householdThere !== null && !householdThere.isCity) {
       namesOfTheCleared.add(householdThere.name);
     }
-    clearForTheCity(settlement, pointIndex);
+    clearForTheCity(settlement, pointIndex, 'publicBuildingSites');
     aqueductIsCut = aqueductIsCut || (volume.works[pointIndex] & WORK.duct) !== 0;
     volume.works[pointIndex] &= ~WORK.duct;
     for (let level = 0; level < place.levelCount; level++) {
@@ -224,7 +226,7 @@ function buildAPublicBuildingIfDue(settlement) {
     pointIndices: site.points.map(function (place) { return place.pointIndex; }),
     grid: site.grid || null, free: site.free || null, openPoints: site.openPoints || [], day: settlement.dayCount,
   });
-  spend(settlement, wanted.money * settlement.parameters.publicWorksCostScale);
+  spend(settlement, wanted.money * settlement.parameters.publicWorksCostScale, 'publicBuildings');
   settlement.raiseSecurityForAPublicBuilding(site.points[Math.floor(site.points.length / 2)].pointIndex);
   const firstPointOfIt = site.points[0].pointIndex;
   writeInTheChronicle(settlement, wanted.kind + ' built at ' + settlement.households.length + ' households, ' +
@@ -244,12 +246,14 @@ function buildAPublicBuildingIfDue(settlement) {
     const frontPoints = builtNow.pointIndices.filter(function (pointIndex) { return forwardOf[pointIndex] > farthestForward - cellSize * 0.75; });
     builtNow.openPoints = squareBeforeTheFront(settlement, frontPoints, builtNow.pointIndices);
   }
-  // the square is cleared (what stands there is bought) and stays open
+  // the square is cleared (what stands there is bought) and stays open from now on: nobody
+  // settles or builds there (isKeptOpen holds through the simulation, not only when the town is drawn)
   (builtNow.openPoints || []).forEach(function (pointIndex) {
     const householdThere = settlement.ownerOfPoint[pointIndex];
     if (householdThere !== null && !householdThere.isCity) {
-      clearForTheCity(settlement, pointIndex);
+      clearForTheCity(settlement, pointIndex, 'squares');
     }
+    settlement.isKeptOpen[pointIndex] = 1;
   });
   // the aqueduct keeps its distance from it: where it ran through the ground the building keeps
   // clear, it is cut and led anew
@@ -609,12 +613,12 @@ function buildAFountainIfNeeded(settlement) {
     return false;
   }
   route.points.forEach(function (pointIndex) {
-    clearForTheCity(settlement, pointIndex);
+    clearForTheCity(settlement, pointIndex, 'aqueduct');
     volume.works[pointIndex] |= WORK.duct;
   });
   volume.works[site] |= WORK.duct | WORK.fountain;
   city.fountainPoints.push(site);
-  spend(settlement, (parameters.moneyForAFountain + route.newPointCount * parameters.moneyForADuctPoint) * parameters.publicWorksCostScale);
+  spend(settlement, (parameters.moneyForAFountain + route.newPointCount * parameters.moneyForADuctPoint) * parameters.publicWorksCostScale, 'aqueduct');
   writeInTheChronicle(settlement, 'fountain ' + city.fountainPoints.length + ' built for ' + mostHouseholdsReached + ' households without water; ' + route.newPointCount + ' points of aqueduct');
   return true;
 }
@@ -633,10 +637,10 @@ function leadTheAqueductsAnew(settlement) {
       return; // no way left to the water: the fountain stands dry
     }
     route.points.forEach(function (pointIndex) {
-      clearForTheCity(settlement, pointIndex);
+      clearForTheCity(settlement, pointIndex, 'aqueduct');
       volume.works[pointIndex] |= WORK.duct;
     });
-    spend(settlement, route.newPointCount * settlement.parameters.moneyForADuctPoint * settlement.parameters.publicWorksCostScale);
+    spend(settlement, route.newPointCount * settlement.parameters.moneyForADuctPoint * settlement.parameters.publicWorksCostScale, 'aqueduct');
   });
 }
 
@@ -769,7 +773,7 @@ function buildTheWallIfDue(settlement) {
     return !(volume.works[pointIndex] & (WORK.wall | WORK.gate));
   });
   newWallPoints.forEach(function (pointIndex) {
-    clearForTheCity(settlement, pointIndex);
+    clearForTheCity(settlement, pointIndex, 'wallClearing');
     volume.works[pointIndex] |= WORK.wall;
   });
   chooseTheGates(settlement, newWallPoints).forEach(function (pointIndex) {
@@ -779,7 +783,7 @@ function buildTheWallIfDue(settlement) {
   writeInTheChronicle(settlement, 'wall ' + settlement.wallCount + ' built at ' + lastingHouseholdCount + ' lasting households: ' + newWallPoints.length + ' points');
   settlement.isWithinWalls.set(plan.isInside);
   settlement.hasAWall = true;
-  spend(settlement, newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale);
+  spend(settlement, newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale, 'wall');
   return true;
 }
 

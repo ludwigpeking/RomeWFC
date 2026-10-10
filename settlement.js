@@ -252,6 +252,7 @@ export class Settlement {
     this.namesTaken = new Set();
     this.householdCount = 0;
     this.isKeptOpen = new Uint8Array(pointCount);
+    this.isAGuaranteedPassage = new Uint8Array(pointCount); // opened by the city for a household that had no way out: stays open
     volume.streetGrades = new Uint8Array(pointCount);
     volume.shopFronts = new Map();
     volume.roofTerraces = new Uint8Array(pointCount);
@@ -752,7 +753,7 @@ export class Settlement {
       if (household === null || household.isCity || settlement.volume.tierAt(pointIndex, 0) === TIER.classical) {
         return;
       }
-      settlement.clearForTheCity(pointIndex);
+      settlement.clearForTheCity(pointIndex, 'keptOpen');
       settlement.clearedBuildingCount++;
       volumeChanged = true;
     });
@@ -760,13 +761,14 @@ export class Settlement {
   }
 
   // A point bought by the city at its worth and cleared
-  clearForTheCity(pointIndex) {
+  clearForTheCity(pointIndex, cause) {
     this.demolitionCount++;
     const household = this.ownerOfPoint[pointIndex];
     const worth = this.worthAsParcel(pointIndex);
     household.money += worth;
     this.city.money -= worth;
     this.city.moneySpent += worth;
+    this.city.spentOn[cause || 'clearing'] = (this.city.spentOn[cause || 'clearing'] || 0) + worth;
     this.takePoint(pointIndex);
     this.volume.setTier(pointIndex, 0, TIER.empty);
     this.pressure[pointIndex] = 0;
@@ -784,21 +786,51 @@ export class Settlement {
   // work, and leaving every building beside it some open ground. A road only where its traffic is
   // not that of a busy street (isRoadAllowed).
   mayTake(pointIndex, isRoadAllowed) {
-    if (!this.isFree(pointIndex) || this.isKeptOpen[pointIndex] || this.volume.works[pointIndex] !== 0 || this.map.points[pointIndex].isOnBoundary) {
+    if (!this.isFree(pointIndex) || this.isKeptOpen[pointIndex] || this.isAGuaranteedPassage[pointIndex] || this.volume.works[pointIndex] !== 0 || this.map.points[pointIndex].isOnBoundary) {
       return false;
     }
     if (this.isRoad(pointIndex) && (!isRoadAllowed || this.volume.streetGrades[pointIndex] === STREET_GRADE.busyStreet)) {
       return false;
     }
+    // ... and leaving itself and every building beside it free ground that still reaches a road
+    // (not a pocket walled in by buildings), so that nobody is left without a way out
     const settlement = this;
-    function keepsOpenGround(ofPoint) {
-      return settlement.neighboursOfPoint[ofPoint].some(function (neighbourPoint) {
-        return neighbourPoint !== pointIndex && settlement.isFree(neighbourPoint);
-      });
+    function keepsAWayOut(ofPoint) {
+      return settlement.freeGroundReachesARoad(ofPoint, pointIndex);
     }
-    return keepsOpenGround(pointIndex) && this.neighboursOfPoint[pointIndex].every(function (neighbourPoint) {
-      return settlement.isFree(neighbourPoint) || keepsOpenGround(neighbourPoint);
+    return keepsAWayOut(pointIndex) && this.neighboursOfPoint[pointIndex].every(function (neighbourPoint) {
+      return settlement.isFree(neighbourPoint) || keepsAWayOut(neighbourPoint);
     });
+  }
+
+  // Whether the free ground beside a point reaches a road (or the rim of the map) within a few
+  // steps over free ground, with one point (exceptPoint) counted as taken
+  freeGroundReachesARoad(ofPoint, exceptPoint) {
+    const stepLimit = 6;
+    const seen = new Set([exceptPoint, ofPoint]);
+    let ring = [];
+    for (const neighbourPoint of this.neighboursOfPoint[ofPoint]) {
+      if (neighbourPoint !== exceptPoint && this.isFree(neighbourPoint)) {
+        seen.add(neighbourPoint);
+        ring.push(neighbourPoint);
+      }
+    }
+    for (let step = 0; step < stepLimit && ring.length > 0; step++) {
+      const next = [];
+      for (const ringPoint of ring) {
+        if (this.isRoad(ringPoint) || this.map.points[ringPoint].isOnBoundary || (this.volume.works[ringPoint] & (WORK.gate | WORK.passage)) !== 0) {
+          return true;
+        }
+        for (const neighbourPoint of this.neighboursOfPoint[ringPoint]) {
+          if (!seen.has(neighbourPoint) && this.isFree(neighbourPoint) && (this.volume.works[neighbourPoint] & WORK.wall) === 0) {
+            seen.add(neighbourPoint);
+            next.push(neighbourPoint);
+          }
+        }
+      }
+      ring = next;
+    }
+    return false;
   }
 
   // What the city asks for a free point: the value of its land (a street is worth much more)
@@ -1229,7 +1261,8 @@ export class Settlement {
           }
         });
         if (cheapest !== -1) {
-          this.breakDown(cheapest);
+          this.breakDown(cheapest, 'forcedDemolition');
+          this.isAGuaranteedPassage[cheapest] = 1; // the city guarantees the passage: nobody builds there again
           buildingFell = true;
         }
       } else {
@@ -1266,8 +1299,8 @@ export class Settlement {
   }
 
   // A building in the way: the city buys it at its worth, pulls it down, and the ground is road again
-  breakDown(pointIndex) {
-    this.clearForTheCity(pointIndex);
+  breakDown(pointIndex, cause) {
+    this.clearForTheCity(pointIndex, cause || 'pressureDemolition');
     this.recentTraffic[pointIndex] = Math.max(this.recentTraffic[pointIndex], roadRecentTraffic);
     this.brokenBuildingCount++;
   }
@@ -1482,6 +1515,9 @@ export class Settlement {
     }
     if (this.isKeptOpen[pointIndex]) {
       lines.push('kept open before a monument');
+    }
+    if (this.isAGuaranteedPassage[pointIndex]) {
+      lines.push('a passage the city opened and guarantees');
     }
     if (this.hasAWall) {
       lines.push(this.isWithinWalls[pointIndex] ? 'within the walls' : 'outside the walls');
@@ -1796,6 +1832,7 @@ export class Settlement {
       gates: this.countOfWork(WORK.gate),
       taxCollected: Math.round(this.city.moneyCollected),
       moneySpentByTheCity: Math.round(this.city.moneySpent),
+      citySpentOn: JSON.stringify(this.city.spentOn || {}),
     };
   }
 
@@ -1831,14 +1868,14 @@ export class Settlement {
       traffic: roundedList(this.traffic), recentTraffic: roundedList(this.recentTraffic), trafficValue: roundedList(this.trafficValue),
       security: roundedList(this.security), pressure: roundedList(this.pressure),
       otherTowns: this.otherTowns.map(function (town) { return town.pointIndices[0]; }),
-      isKeptOpen: Array.from(this.isKeptOpen),
+      isKeptOpen: Array.from(this.isKeptOpen), isAGuaranteedPassage: Array.from(this.isAGuaranteedPassage),
       levelCount: this.volume.levelCount, tiers: Array.from(this.volume.tiers), owners: Array.from(this.volume.owners),
       streetGrades: Array.from(this.volume.streetGrades), shopFronts: shopFronts, roofTerraces: Array.from(this.volume.roofTerraces),
       works: Array.from(this.volume.works), publicBuildings: this.volume.publicBuildings,
       publicBuildingOfPoint: Array.from(this.volume.publicBuildingOfPoint),
       city: {
         money: Math.round(this.city.money), fountainPoints: this.city.fountainPoints, moneyCollected: Math.round(this.city.moneyCollected),
-        moneySpent: Math.round(this.city.moneySpent), chronicle: this.city.chronicle,
+        moneySpent: Math.round(this.city.moneySpent), spentOn: this.city.spentOn, chronicle: this.city.chronicle,
       },
       isWithinWalls: Array.from(this.isWithinWalls), hasAWall: this.hasAWall, wallCount: this.wallCount,
     };
@@ -1886,6 +1923,9 @@ export class Settlement {
       return restored;
     });
     settlement.isKeptOpen.set(saved.isKeptOpen);
+    if (saved.isAGuaranteedPassage) {
+      settlement.isAGuaranteedPassage.set(saved.isAGuaranteedPassage);
+    }
     volume.tiers.set(saved.tiers);
     volume.owners.set(saved.owners);
     volume.streetGrades.set(saved.streetGrades);

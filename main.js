@@ -762,7 +762,7 @@ function showDataLayer() {
       } else {
         return;
       }
-    } else if (dataLayerName === 'streets' && settlement.isKeptOpen[pointIndex]) {
+    } else if (dataLayerName === 'streets' && (settlement.isKeptOpen[pointIndex] || settlement.isAGuaranteedPassage[pointIndex])) {
       colour = keptOpenLayerColour;
     } else if (value === null) {
       return;
@@ -1771,7 +1771,7 @@ window.rome = {
         const middleRow = building.grid[Math.floor(building.grid.length / 2)];
         point = map.points[middleRow[Math.floor(middleRow.length / 2)]];
       }
-      return { kind: building.kind, x: Math.round(point.x), z: Math.round(point.z) };
+      return { kind: building.kind, x: Math.round(point.x), z: Math.round(point.z), frontX: building.free ? building.free.frontX : 0, frontZ: building.free ? building.free.frontZ : 1 };
     });
     [['gate', 2, 40], ['fountain', 8, 1], ['wall', 1, 100000]].forEach(function (work) {
       let found = 0;
