@@ -35,6 +35,11 @@ export const MATERIAL_COLOURS = {
   canvasHemp: 0xa39577,
   canvasLinen: 0xd9cfb4,
   grass: 0x8a9a5b,        // a garden
+  // the fields round the town: young corn, ripe corn, olives, fallow earth
+  fieldGreen: 0x8e9e52,
+  fieldStraw: 0xc9b56a,
+  fieldOlive: 0x9aa070,
+  fieldFallow: 0xb8a583,
   leaf: 0x4d6b3c,         // its trees
   leafPale: 0x8a9a78,     // the silver green of an olive
   // people: a man in white, a woman in one of the colours of dress; skin; black hair

@@ -122,7 +122,7 @@ const stepsOfAPublicSecurityBoost = influenceEdges; // ... and a public building
 const stepsOfFarmland = 5;               // a farmer works the land this many steps round it
 const tradeRouteWeight = 12;
 const JOURNEY_WEIGHT = { farmer: 1, merchant: 2 };
-const DRAW_OF_A_VENUE = { circus: 5, amphitheatre: 4, theatre: 3, basilica: 2.5, pantheon: 2.5, temple: 1.5 };
+const DRAW_OF_A_VENUE = { circus: 5, amphitheatre: 4, theatre: 3, basilica: 3, pantheon: 3, temple: 2 };
 const mostJourneysToShow = 400;
 
 // Streets. The recent traffic of a point is its journeys, the older ones counting less every day.
@@ -1159,7 +1159,8 @@ export class Settlement {
       return aVenue();
     }
     const choice = this.random.nextFloat();
-    if (choice < 0.4 && this.otherTowns.length === 2) {
+    // (the author, 2026-10-10: the public buildings draw much of the traffic)
+    if (choice < 0.25 && this.otherTowns.length === 2) {
       return this.otherTowns[this.random.nextInt(2)];
     }
     if (choice < 0.7) {

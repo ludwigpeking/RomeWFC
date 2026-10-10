@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils';
-import { PointVolume, TIER, SeededRandom, levelHeightOfTier, classicalLevelHeight } from './volume';
+import { PointVolume, TIER, SeededRandom, levelHeightOfTier, classicalLevelHeight, placeHash } from './volume';
 import { createSquareMap, createIrregularMap, shrinkOutline } from './topology';
 import { PartCollector, createMaterials, cellSize, materialsAreLoaded } from './parts';
 import { buildClassicalTier } from './classical';
@@ -502,7 +502,10 @@ function startNewSettlement() {
 // them; where the settlement has to clear a building away for that, the town is built once more.
 function rebuildSettledTown() {
   let monumentNames = rebuildTown();
-  for (let attempt = 0; attempt < 3 && settlement !== null && settlement.keepOpen(groundToKeepOpen); attempt++) {
+  // (the squares before the public buildings stay open too)
+  const squares = [];
+  volume.publicBuildings.forEach(function (building) { (building.openPoints || []).forEach(function (pointIndex) { squares.push(pointIndex); }); });
+  for (let attempt = 0; attempt < 3 && settlement !== null && settlement.keepOpen(groundToKeepOpen.concat(squares)); attempt++) {
     monumentNames = rebuildTown();
   }
   return monumentNames;
@@ -555,11 +558,28 @@ function showStreets() {
   if (settlement === null || volume.streetGrades === null) {
     return;
   }
-  const coordinatesOfMaterial = { cobble: [], paving: [] };
+  // the streets cobbled or paved; the free ground that is nobody's and no street is farmland, in
+  // fields of green and straw (each point its own field, so that the fields are skewed with the grid)
+  const coordinatesOfMaterial = { cobble: [], paving: [], fieldGreen: [], fieldStraw: [], fieldOlive: [], fieldFallow: [] };
+  const fieldNames = ['fieldGreen', 'fieldStraw', 'fieldOlive', 'fieldFallow'];
   map.points.forEach(function (point, pointIndex) {
     const grade = volume.streetGrades[pointIndex];
     const isAStreet = grade > 0 || (volume.works[pointIndex] & 18) !== 0; // also a gate and the passage of an arch
-    if (!isAStreet || !settlement.isFree(pointIndex) || (volume.works[pointIndex] & 1) !== 0) {
+    if (!settlement.isFree(pointIndex) || (volume.works[pointIndex] & 1) !== 0) {
+      return;
+    }
+    if (!isAStreet && volume.works[pointIndex] === 0 && !settlement.isKeptOpen[pointIndex] && !point.isOnBoundary) {
+      const fieldCoordinates = coordinatesOfMaterial[fieldNames[Math.floor(placeHash(pointIndex, 0, 91) * fieldNames.length)]];
+      map.quartersOfPoint[pointIndex].forEach(function (quarter) {
+        [[0, 2, 1], [0, 3, 2]].forEach(function (triangle) {
+          triangle.forEach(function (cornerIndex) {
+            fieldCoordinates.push(quarter.outline[cornerIndex][0], 0.03, quarter.outline[cornerIndex][1]);
+          });
+        });
+      });
+      return;
+    }
+    if (!isAStreet) {
       return;
     }
     const coordinates = coordinatesOfMaterial[grade === 2 ? 'paving' : 'cobble'];

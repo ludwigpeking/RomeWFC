@@ -163,6 +163,27 @@ function buildTheatre(collector, widthPoints, depthPoints, levelCount) {
   [-0.6, 0, 0.6].forEach(function (share) { // the three doors of the stage wall
     collector.box('interior', 1.5, 2.6, 0.1, share * radius, 1.1, backZ + stageBuildingDepth + 0.03);
   });
+  // the back of the stage building looks like a building of the town: blind windows in two
+  // storeys between pilasters of shade, a portal at the ground (the author, 2026-10-10)
+  const backFaceZ = backZ - 0.06;
+  const bayCount = Math.max(5, Math.round(radius / 1.6) * 2 + 1);
+  for (let bay = 0; bay < bayCount; bay++) {
+    const alongX = -radius + (bay + 0.5) * (2 * radius / bayCount);
+    const isTheMiddle = bay === Math.floor(bayCount / 2);
+    for (let storey = 0; storey < 2; storey++) {
+      const sillY = 1.4 + storey * (height - 1.5) / 2;
+      if (storey === 0 && isTheMiddle) {
+        continue;
+      }
+      collector.box('stoneShade', 1.1, 1.9, 0.12, alongX, sillY, backFaceZ); // a blind window: a shallow recess
+      collector.box('stone', 1.4, 0.18, 0.2, alongX, sillY + 1.9, backFaceZ - 0.02); // its lintel
+    }
+  }
+  collector.box('stoneShade', 2 * radius, 0.3, 0.25, 0, 1.1 + (height - 1.5) / 2 - 0.3, backFaceZ); // the string course between the storeys
+  // the portal: an arched door in a frame of stone, two steps before it
+  collector.box('stone', 3.4, 4.6, 0.3, 0, 0.3, backFaceZ - 0.08);
+  collector.box('interior', 2.2, 3.6, 0.12, 0, 0.3, backFaceZ - 0.3);
+  collector.box('stoneShade', 4.2, 0.3, 1.0, 0, 0, backFaceZ - 0.6);
 }
 
 // An amphitheatre: an oval of seats round an arena of sand, behind three storeys of arcades

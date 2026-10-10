@@ -161,3 +161,9 @@ What the code assumes to run it (ASSUMED in settlement.js):
   choose the most desirable unoccupied land": a newcomer pays nothing for its first point and takes
   the best free point of the whole map (a merchant by location value, a farmer by farmland). A
   farmer now arrives with 150 (ASSUMED), less than a house costs, so that it still begins in a hut.
+- 2026-10-10 (the author): the public works came too late: every cost of the city is now x3 (was
+  x6); the public buildings draw more traffic (merchants: other towns 25%, venues 45%, households
+  30%; temple 2, basilica 3, pantheon 3); another temple for every 250 households beyond the
+  first; the basilica is the tall one (3 x 5, three levels); the square before a public building
+  (every point within two edges of its front) is cleared and kept open; the free ground is
+  farmland until it becomes parcels and streets.

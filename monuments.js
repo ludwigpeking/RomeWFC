@@ -123,11 +123,17 @@ function spread(count, extent) {
 // clear of the wall of the block above. baseY: the floor it stands on.
 export function buildAedicule(collector, baseY, hasRoof, hasBackWall, hasDoor) {
   const footprint = cellSize + 2 * outreach;
+  // (one that carries a block above it (no roof of its own) is closed: walls between pilasters,
+  // an arched door on its front, so that it looks able to bear the house on it)
+  const isClosed = !hasRoof;
   buildStorey(collector, {
-    widthPoints: 1, depthPoints: 1, bottomY: baseY, hasBase: true, hasHead: true, isClosedInside: false,
+    widthPoints: 1, depthPoints: 1, bottomY: baseY, hasBase: true, hasHead: true, isClosedInside: isClosed,
     structureOf: function (side) {
       if (side === 2 && hasDoor) {
         return 'arch';
+      }
+      if (isClosed) {
+        return side === 0 ? 'arch' : 'pillarOnWall';
       }
       return side === 2 && hasBackWall ? 'wall' : 'pillar';
     },

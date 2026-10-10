@@ -48,7 +48,7 @@ export const CITY_PARAMETER_DEFAULTS = {
   shareOutsideForANewWall: 0.6,            // ... and they have to be this share of the blocks inside, too
   // every public work costs this many times what is written here and in PUBLIC_BUILDINGS: a large
   // chunk of what the city takes in, so that it saves a long while for each
-  publicWorksCostScale: 6,
+  publicWorksCostScale: 3,                 // (6 until 2026-10-10: the works came too late)
   moneyForAWallPoint: 50,
   moneyForADuctPoint: 60,
   moneyForANewAqueductSource: 2500,        // where an aqueduct is led in anew over the rim of the map (so that few are)
@@ -61,9 +61,10 @@ export const CITY_PARAMETER_DEFAULTS = {
 // its place once the city has a wall (place: 'withinTheWalls' or 'byAGate').
 // levelCountAt(column, row): how many classical levels stand on each point of the footprint.
 export const PUBLIC_BUILDINGS = [
-  { kind: 'temple', place: 'withinTheWalls', householdsNeeded: 30, widthPoints: 2, depthPoints: 4, levelCount: 2, money: 1500, opensToTheFront: true },
+  // (anotherEvery: one more of them for every so many households beyond the first)
+  { kind: 'temple', place: 'withinTheWalls', householdsNeeded: 30, anotherEvery: 250, widthPoints: 2, depthPoints: 4, levelCount: 2, money: 1500, opensToTheFront: true },
   { kind: 'cityArch', householdsNeeded: 50, widthPoints: 3, depthPoints: 1, levelCount: 2, money: 1200, standsOverABusyStreet: true },
-  { kind: 'basilica', place: 'withinTheWalls', householdsNeeded: 80, widthPoints: 3, depthPoints: 5, levelCount: 2, money: 3000, opensToTheFront: true },
+  { kind: 'basilica', place: 'withinTheWalls', householdsNeeded: 80, widthPoints: 3, depthPoints: 5, levelCount: 3, money: 3000, opensToTheFront: true },
   { kind: 'theatre', standsFreeOfTheGrid: true, place: 'byAGate', householdsNeeded: 110, widthPoints: 5, depthPoints: 4, levelCount: 2, money: 4000 },
   { kind: 'amphitheatre', standsFreeOfTheGrid: true, place: 'byAGate', householdsNeeded: 140, widthPoints: 6, depthPoints: 8, levelCount: 3, money: 7000 },
   {
@@ -161,14 +162,16 @@ function middleOfTheTown(settlement) {
 // ---------------------------------------------------------------------------
 function buildAPublicBuildingIfDue(settlement) {
   const volume = settlement.volume;
-  const builtKinds = new Set(volume.publicBuildings.map(function (building) { return building.kind; }));
+  const builtOfKind = {};
+  volume.publicBuildings.forEach(function (building) { builtOfKind[building.kind] = (builtOfKind[building.kind] || 0) + 1; });
   const scale = settlement.parameters.householdsScaleOfPublicBuildings;
   // the first of the buildings that are due for which there is the money and a site: one that
   // finds no place does not hold up the next
   let wanted = null;
   let site = null;
   for (const candidate of PUBLIC_BUILDINGS) {
-    if (builtKinds.has(candidate.kind) || settlement.households.length < candidate.householdsNeeded * scale) {
+    const builtCount = builtOfKind[candidate.kind] || 0;
+    if ((builtCount > 0 && !candidate.anotherEvery) || settlement.households.length < (candidate.householdsNeeded + builtCount * (candidate.anotherEvery || 0)) * scale) {
       continue;
     }
     if (settlement.city.money < candidate.money * settlement.parameters.publicWorksCostScale) {
@@ -228,6 +231,26 @@ function buildAPublicBuildingIfDue(settlement) {
     (settlement.hasAWall ? (settlement.isWithinWalls[firstPointOfIt] ? 'within the walls' : 'outside the walls') : 'before there was a wall') +
     '; clearing its site cost ' + Math.round(site.moneyForClearing) +
     (namesOfTheCleared.size > 0 ? ' (paid to ' + Array.from(namesOfTheCleared).join(', ') + ')' : ''));
+  // a building that stands free of the grid: its square from the points of it nearest its front
+  const builtNow = volume.publicBuildings[volume.publicBuildings.length - 1];
+  if (site.free && !wanted.standsOverABusyStreet) {
+    let farthestForward = -Infinity;
+    const forwardOf = {};
+    builtNow.pointIndices.forEach(function (pointIndex) {
+      const point = settlement.map.points[pointIndex];
+      forwardOf[pointIndex] = (point.x - site.free.x) * site.free.frontX + (point.z - site.free.z) * site.free.frontZ;
+      farthestForward = Math.max(farthestForward, forwardOf[pointIndex]);
+    });
+    const frontPoints = builtNow.pointIndices.filter(function (pointIndex) { return forwardOf[pointIndex] > farthestForward - cellSize * 0.75; });
+    builtNow.openPoints = squareBeforeTheFront(settlement, frontPoints, builtNow.pointIndices);
+  }
+  // the square is cleared (what stands there is bought) and stays open
+  (builtNow.openPoints || []).forEach(function (pointIndex) {
+    const householdThere = settlement.ownerOfPoint[pointIndex];
+    if (householdThere !== null && !householdThere.isCity) {
+      clearForTheCity(settlement, pointIndex);
+    }
+  });
   // the aqueduct keeps its distance from it: where it ran through the ground the building keeps
   // clear, it is cut and led anew
   groundKeptClearOfTheAqueduct(settlement, volume.publicBuildings[volume.publicBuildings.length - 1]).forEach(function (pointIndex) {
@@ -328,18 +351,29 @@ function findTheCheapestSite(settlement, wanted) {
           sumZ += map.points[pointIndex].z;
         }
       }
-      // the ground before its steps will be kept open: what stands there counts too
+      // the square before its front will be kept open: what stands there counts too
       if (wanted.opensToTheFront && moneyForClearing < Infinity) {
+        const frontPoints = [];
         for (let column = 0; column < wanted.widthPoints; column++) {
-          const pointIndex = grid[wanted.depthPoints + 1][column + 1];
+          frontPoints.push(grid[wanted.depthPoints][column + 1]);
+        }
+        const ownPoints = [];
+        for (let row = 0; row < wanted.depthPoints; row++) {
+          for (let column = 0; column < wanted.widthPoints; column++) {
+            ownPoints.push(grid[row + 1][column + 1]);
+          }
+        }
+        for (let column = 0; column < wanted.widthPoints; column++) {
+          traffic += settlement.recentTraffic[grid[wanted.depthPoints + 1][column + 1]];
+        }
+        squareBeforeTheFront(settlement, frontPoints, ownPoints).forEach(function (pointIndex) {
           const household = settlement.ownerOfPoint[pointIndex];
-          if (volume.works[pointIndex] !== 0 || volume.publicBuildingOfPoint[pointIndex] !== 0 || (household !== null && household.isCity)) {
+          if (household !== null && household.isCity) {
             moneyForClearing = Infinity;
           } else if (household !== null) {
             moneyForClearing += settlement.worthAsParcel(pointIndex);
           }
-          traffic += settlement.recentTraffic[pointIndex];
-        }
+        });
       }
       if (moneyForClearing === Infinity || moneyForClearing > moneyForClearingAtMost) {
         continue;
@@ -373,8 +407,33 @@ function findTheCheapestSite(settlement, wanted) {
         });
       }
     }
+    if (wanted.opensToTheFront) {
+      const frontPoints = [];
+      for (let column = 0; column < wanted.widthPoints; column++) {
+        frontPoints.push(best.grid[wanted.depthPoints][column + 1]);
+      }
+      best.openPoints = squareBeforeTheFront(settlement, frontPoints, best.points.map(function (place) { return place.pointIndex; }));
+    }
   }
   return best;
+}
+
+// The square before a public building: every point within two edges of the points of its front
+// (the author, 2026-10-10), but not its own points, the rim of the map, the works of the city or
+// another public building. Kept open: nobody settles or builds there.
+function squareBeforeTheFront(settlement, frontPoints, ownPoints) {
+  const map = settlement.map;
+  const volume = settlement.volume;
+  const isOwn = new Set(ownPoints);
+  const square = new Set();
+  frontPoints.forEach(function (frontPoint) {
+    settlement.pointsWithinSteps(frontPoint, 2).forEach(function (pointIndex) {
+      if (!isOwn.has(pointIndex) && !map.points[pointIndex].isOnBoundary && volume.works[pointIndex] === 0 && volume.publicBuildingOfPoint[pointIndex] === 0) {
+        square.add(pointIndex);
+      }
+    });
+  });
+  return Array.from(square);
 }
 
 // The cheapest place for a building that does not follow the grid. It is tried with its middle
