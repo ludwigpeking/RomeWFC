@@ -46,6 +46,9 @@ export const CITY_PARAMETER_DEFAULTS = {
   householdsForTheWall: 70,                // lasting households (not in huts) from which the city walls itself in
   blocksOutsideForANewWall: 60,            // lasting blocks outside the walls from which another wall is thought of ...
   shareOutsideForANewWall: 0.6,            // ... and they have to be this share of the blocks inside, too
+  // every public work costs this many times what is written here and in PUBLIC_BUILDINGS: a large
+  // chunk of what the city takes in, so that it saves a long while for each
+  publicWorksCostScale: 6,
   moneyForAWallPoint: 50,
   moneyForADuctPoint: 60,
   moneyForAFountain: 400,
@@ -128,7 +131,7 @@ function costOfClearing(settlement, pointIndex, maybeOnABusyStreet) {
   // a stretch of the aqueduct in the way has to be built again elsewhere
   let moneyForWorks = 0;
   if (works & WORK.duct) {
-    moneyForWorks += 3 * settlement.parameters.moneyForADuctPoint;
+    moneyForWorks += 3 * settlement.parameters.moneyForADuctPoint * settlement.parameters.publicWorksCostScale;
   }
   if (household !== null) {
     return household.isCity ? Infinity : moneyForWorks + settlement.worthAsParcel(pointIndex);
@@ -167,7 +170,7 @@ function buildAPublicBuildingIfDue(settlement) {
     if (builtKinds.has(candidate.kind) || settlement.households.length < candidate.householdsNeeded * scale) {
       continue;
     }
-    if (settlement.city.money < candidate.money) {
+    if (settlement.city.money < candidate.money * settlement.parameters.publicWorksCostScale) {
       break; // the city saves for it
     }
     if (settlement.dayCount < (settlement.city.dayOfNextSearch[candidate.kind] || 0)) {
@@ -177,7 +180,7 @@ function buildAPublicBuildingIfDue(settlement) {
     if (siteOfIt === null) {
       settlement.city.dayOfNextSearch[candidate.kind] = settlement.dayCount + daysBeforeAFailedSearchIsRepeated;
     }
-    if (siteOfIt !== null && settlement.city.money >= candidate.money + siteOfIt.moneyForClearing) {
+    if (siteOfIt !== null && settlement.city.money >= candidate.money * settlement.parameters.publicWorksCostScale + siteOfIt.moneyForClearing) {
       wanted = candidate;
       site = siteOfIt;
       break;
@@ -217,7 +220,7 @@ function buildAPublicBuildingIfDue(settlement) {
     pointIndices: site.points.map(function (place) { return place.pointIndex; }),
     grid: site.grid || null, free: site.free || null, openPoints: site.openPoints || [], day: settlement.dayCount,
   });
-  spend(settlement, wanted.money);
+  spend(settlement, wanted.money * settlement.parameters.publicWorksCostScale);
   settlement.raiseSecurityForAPublicBuilding(site.points[Math.floor(site.points.length / 2)].pointIndex);
   const firstPointOfIt = site.points[0].pointIndex;
   writeInTheChronicle(settlement, wanted.kind + ' built at ' + settlement.households.length + ' households, ' +
@@ -474,7 +477,7 @@ function buildAFountainIfNeeded(settlement) {
   const isNeeded = city.fountainPoints.length === 0
     ? settlement.households.length >= parameters.householdsForTheFirstFountain
     : unserved.length >= parameters.householdsUnservedForAnotherFountain;
-  if (!isNeeded || city.money < parameters.moneyForAFountain) {
+  if (!isNeeded || city.money < parameters.moneyForAFountain * parameters.publicWorksCostScale) {
     return false;
   }
   // the site: free ground, not a busy street, beside the town, within reach of the most
@@ -503,7 +506,7 @@ function buildAFountainIfNeeded(settlement) {
     return false;
   }
   const route = findTheRouteOfTheAqueduct(settlement, site);
-  if (route === null || city.money < parameters.moneyForAFountain + route.money) {
+  if (route === null || city.money < (parameters.moneyForAFountain + route.money) * parameters.publicWorksCostScale) {
     return false;
   }
   route.points.forEach(function (pointIndex) {
@@ -512,7 +515,7 @@ function buildAFountainIfNeeded(settlement) {
   });
   volume.works[site] |= WORK.duct | WORK.fountain;
   city.fountainPoints.push(site);
-  spend(settlement, parameters.moneyForAFountain + route.newPointCount * parameters.moneyForADuctPoint);
+  spend(settlement, (parameters.moneyForAFountain + route.newPointCount * parameters.moneyForADuctPoint) * parameters.publicWorksCostScale);
   writeInTheChronicle(settlement, 'fountain ' + city.fountainPoints.length + ' built for ' + mostHouseholdsReached + ' households without water; ' + route.newPointCount + ' points of aqueduct');
   return true;
 }
@@ -534,7 +537,7 @@ function leadTheAqueductsAnew(settlement) {
       clearForTheCity(settlement, pointIndex);
       volume.works[pointIndex] |= WORK.duct;
     });
-    spend(settlement, route.newPointCount * settlement.parameters.moneyForADuctPoint);
+    spend(settlement, route.newPointCount * settlement.parameters.moneyForADuctPoint * settlement.parameters.publicWorksCostScale);
   });
 }
 
@@ -659,7 +662,7 @@ function buildTheWallIfDue(settlement) {
     settlement.city.dayOfNextSearch.wall = settlement.dayCount + daysBeforeAFailedSearchIsRepeated;
     return false;
   }
-  if (settlement.city.money < newPointCount * parameters.moneyForAWallPoint) {
+  if (settlement.city.money < newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale) {
     return false;
   }
   // the new wall goes up (the walls that stand stay as they are); huts in its way are cleared
@@ -677,7 +680,7 @@ function buildTheWallIfDue(settlement) {
   writeInTheChronicle(settlement, 'wall ' + settlement.wallCount + ' built at ' + lastingHouseholdCount + ' lasting households: ' + newWallPoints.length + ' points');
   settlement.isWithinWalls.set(plan.isInside);
   settlement.hasAWall = true;
-  spend(settlement, newPointCount * parameters.moneyForAWallPoint);
+  spend(settlement, newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale);
   return true;
 }
 

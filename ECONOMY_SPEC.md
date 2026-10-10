@@ -136,3 +136,15 @@ What the code assumes to run it (ASSUMED in settlement.js):
   property, but when too large (more than 10 cells, the margin reduced to little)"): the bonus on
   every tile of the property is 1 + 0.03 for each cell of garden up to 10 cells, and 0.003 for each
   cell beyond (ASSUMED steps: 1.30 at 10 cells, in place of the flat 1.15).
+- Towers (the author, 2026-10-09: "the taller tower has not appeared, maybe tweak the parameters
+  to encourage it to appear occasionally"): a level more on a tower never pays by rent (utility
+  0.3 up there, cost 3x, upkeep 5%), so it is built for its own sake: a household whose money is
+  4x the cost of the level raises it, with a chance of 25% at each search, accepting a loss of up
+  to 6% of the cost a year; the town allows one tower for every 120 households (ASSUMED numbers).
+- Public works (the author, 2026-10-09: "the public works should spend a large chunk of money.
+  they should not be built before the municipality has enough money"): the city always waited
+  until it had the money, but the costs were small against what it takes in, so everything went
+  up as soon as its household bar was reached. Every cost of the city is now scaled by
+  publicWorksCostScale (ASSUMED 6: temple 9,000, arch 7,200, basilica 18,000, theatre 24,000,
+  amphitheatre 42,000, pantheon 48,000, circus 54,000, fountain 2,400, a point of aqueduct 360,
+  of wall 300).

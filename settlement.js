@@ -80,7 +80,13 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   farmYieldEachDay: 0.06,            // what a farmer takes in a day from each parcel of farmland near it, shared with the other farmers there
   locationValueOfAMerchant: 960,      // a farmer whose home stands on a location of this value turns merchant
   daysBetweenInvestmentSearches: 7,
-  householdsForEachTower: 150,       // the town has room for one tower (a classical block over three levels) for every so many households
+  householdsForEachTower: 120,       // the town has room for one tower (a classical block over three levels) for every so many households
+  // ASSUMED: a tower is built for its own sake, not for its rent: a household rich enough (its
+  // money so many times the cost of the next level) raises one when it may, taking a loss of up
+  // to this share of the cost a year, with this chance at each of its searches
+  moneyMultipleForATower: 4,
+  towerYieldAccepted: -0.06,
+  chanceOfRaisingATower: 0.25,
   journeysPerHouseholdEachDay: 0.35,
   chanceOfAnArrivalEachDay: 0.45,
   mostGroundSettled: 0.45,           // share of the points that may be built on
@@ -1008,13 +1014,18 @@ export class Settlement {
       return kind !== 'hut' && kind !== 'garden' && kind !== 'none';
     });
     let best = null;
+    let towerOption = null; // a level more on a tower: weighed apart, for its own sake
     function consider(option) {
       if (option.cost <= 0 || option.cost > household.money) {
         return;
       }
       const yieldEachYear = option.rentGainedEachDay * daysInAYear / option.cost;
+      option.yieldEachYear = yieldEachYear;
+      if (option.kind === 'tower' && yieldEachYear >= parameters.towerYieldAccepted && household.money >= option.cost * parameters.moneyMultipleForATower &&
+        (towerOption === null || yieldEachYear > towerOption.yieldEachYear)) {
+        towerOption = option;
+      }
       if (yieldEachYear >= parameters.requiredYieldEachYear && (best === null || yieldEachYear > best.yieldEachYear)) {
-        option.yieldEachYear = yieldEachYear;
         best = option;
       }
     }
@@ -1078,6 +1089,9 @@ export class Settlement {
         rentGainedEachDay: settlement.netOfProperty(household, propertyPoints, pointIndex, stack) - settlement.netOfProperty(household, propertyPoints, pointIndex, []),
       });
     });
+    if (towerOption !== null && (best === null || best.kind !== 'tower') && this.random.nextFloat() < parameters.chanceOfRaisingATower) {
+      best = towerOption;
+    }
     if (best === null) {
       return false;
     }
