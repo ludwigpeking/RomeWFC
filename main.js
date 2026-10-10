@@ -1736,7 +1736,7 @@ window.rome = {
       }
       return { kind: building.kind, x: Math.round(point.x), z: Math.round(point.z) };
     });
-    [['gate', 2, 40], ['fountain', 8, 1], ['wall', 1, 1]].forEach(function (work) {
+    [['gate', 2, 40], ['fountain', 8, 1], ['wall', 1, 100000]].forEach(function (work) {
       let found = 0;
       for (let pointIndex = 0; pointIndex < volume.pointCount && found < work[2]; pointIndex++) {
         if (volume.works[pointIndex] & work[1]) {

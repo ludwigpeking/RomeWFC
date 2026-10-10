@@ -62,7 +62,11 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   roofTerraceUtility: 0.3,           // a roof terrace, on top of the utility of its level
   bonusWithAClassicalPortal: 1.1,    // on the house tiles of a property that has a classical ground floor under a house
   bonusWithAClassicalTop: 1.1,       // ... that has a classical top floor on a house
-  bonusWithAGarden: 1.15,            // on every tile of a property that has a garden
+  // the garden of a property raises every tile of it: this much for each cell of garden up to so
+  // many cells, and only this much for each cell beyond (a garden too large adds little more)
+  gardenBonusForEachCell: 0.03,
+  gardenCellsWithFullBonus: 10,
+  gardenBonusForEachCellBeyond: 0.003,
   towerBonusForEachLevel: 1.02,      // on every tile of a property with a tower: this × (the tower's levels − levelsBeforeTheTowerBonus)
   levelsBeforeTheTowerBonus: 6,
   vacantLandFactor: 1.5,             // vacant ground is worth the value of its location × this
@@ -373,14 +377,14 @@ export class Settlement {
   // What a property holds that raises the value of its tiles: stackAt(pointIndex) gives the
   // stack of each of its points
   featuresOfProperty(propertyPoints, stackAt) {
-    const features = { hasAClassicalPortal: false, hasAClassicalTop: false, hasAGarden: false, towerLevelCount: 0 };
+    const features = { hasAClassicalPortal: false, hasAClassicalTop: false, gardenCellCount: 0, towerLevelCount: 0 };
     propertyPoints.forEach(function (pointIndex) {
       const stack = stackAt(pointIndex);
       if (stack.length === 0) {
         return;
       }
       if (stack[0] === TIER.garden) {
-        features.hasAGarden = true;
+        features.gardenCellCount++;
       } else if (stack.every(function (tier) { return tier === TIER.classical; })) {
         features.towerLevelCount = Math.max(features.towerLevelCount, stack.length);
       } else if (stack.indexOf(TIER.vernacular) >= 0) {
@@ -398,8 +402,9 @@ export class Settlement {
     if (tier === TIER.vernacular || tier === TERRACE) {
       bonus *= (features.hasAClassicalPortal ? parameters.bonusWithAClassicalPortal : 1) * (features.hasAClassicalTop ? parameters.bonusWithAClassicalTop : 1);
     }
-    if (features.hasAGarden) {
-      bonus *= parameters.bonusWithAGarden;
+    if (features.gardenCellCount > 0) {
+      const cellsWithFullBonus = Math.min(features.gardenCellCount, parameters.gardenCellsWithFullBonus);
+      bonus *= 1 + parameters.gardenBonusForEachCell * cellsWithFullBonus + parameters.gardenBonusForEachCellBeyond * (features.gardenCellCount - cellsWithFullBonus);
     }
     if (features.towerLevelCount > parameters.levelsBeforeTheTowerBonus) {
       bonus *= parameters.towerBonusForEachLevel * (features.towerLevelCount - parameters.levelsBeforeTheTowerBonus);

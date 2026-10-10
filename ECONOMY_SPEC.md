@@ -132,3 +132,7 @@ What the code assumes to run it (ASSUMED in settlement.js):
 - Kept from before, not in the table: upkeep (1%, classical 5%), management loss, acquisition
   premium 30%, transaction tax 5%, the 3% yield test. Dropped: the bonus only on a household's
   first two classical blocks; a garden's 15% on the rent beside it (now: in the property).
+- Garden bonus by size (the author, 2026-10-09: "the garden size growth should add bonus to the
+  property, but when too large (more than 10 cells, the margin reduced to little)"): the bonus on
+  every tile of the property is 1 + 0.03 for each cell of garden up to 10 cells, and 0.003 for each
+  cell beyond (ASSUMED steps: 1.30 at 10 cells, in place of the flat 1.15).
