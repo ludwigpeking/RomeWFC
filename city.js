@@ -289,11 +289,12 @@ function findTheCheapestSite(settlement, wanted) {
   if (wanted.standsFreeOfTheGrid) {
     return findTheCheapestFreeSite(settlement, wanted, mustBeWithinTheWalls, moneyForItsDistance);
   }
-  // Every place it fits, with what clearing it costs and the traffic it would stand at: the arch
-  // over the busiest street, a temple or a basilica at the busiest front; of the places within
-  // trafficShareThatCounts of the busiest, the cheapest is taken.
+  // Every place it fits that the city can pay for (the building and the clearing), with the
+  // traffic it would stand at: the arch over the busiest street, a temple or a basilica at the
+  // busiest front; of the places within trafficShareThatCounts of the busiest, the cheapest is taken.
   const candidates = [];
   const trafficShareThatCounts = wanted.standsOverABusyStreet ? 0.9 : 0.7;
+  const moneyForClearingAtMost = settlement.city.money - wanted.money * settlement.parameters.publicWorksCostScale;
   for (let firstPoint = 0; firstPoint < map.points.length; firstPoint++) {
     for (const secondPoint of map.sideNeighboursOfPoint[firstPoint]) {
       const grid = latticePatch(map, firstPoint, secondPoint, wanted.widthPoints + 2, wanted.depthPoints + 2);
@@ -340,7 +341,7 @@ function findTheCheapestSite(settlement, wanted) {
           traffic += settlement.recentTraffic[pointIndex];
         }
       }
-      if (moneyForClearing === Infinity) {
+      if (moneyForClearing === Infinity || moneyForClearing > moneyForClearingAtMost) {
         continue;
       }
       const pointCount = wanted.widthPoints * wanted.depthPoints;
