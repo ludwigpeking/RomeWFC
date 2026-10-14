@@ -232,3 +232,9 @@ What the code assumes to run it (ASSUMED in settlement.js):
   part collector no longer carries normals and colours on every part before merging. On the
   irregular ground of 18 rings at day 2,000: a day of simulation 177 to 80 ms, a rebuild of
   the town 6.4 to 4.9 s, the garbage of a rebuild about a third less.
+
+- 2026-10-14, a fix: the allowance of towers (one for every householdsForEachTower households)
+  counted every point of four classical levels, the city's buildings among them; the Pantheon's nine
+  points under its dome filled the allowance of a town under 1,100 households, and no household
+  could begin a tower once it stood. Only the households' towers count now. On the irregular
+  ground of 14 rings, seed 3004: no tower before, three towers of ten levels by day 1,500 after.

@@ -998,9 +998,14 @@ export class Settlement {
     if (household.pointIndices.some(isATower)) {
       return false;
     }
+    // (only the households' towers count: the city's buildings of four classical levels, the
+    // Pantheon's nine points under its dome, counted as towers until 2026-10-14, and once the
+    // Pantheon stood no household could begin a tower again in a town of fewer than 1,100)
     let towerCount = 0;
     for (let pointIndex = 0; pointIndex < this.map.points.length; pointIndex++) {
-      if (volume.tierAt(pointIndex, 3) === TIER.classical && isATower(pointIndex)) {
+      const owner = this.ownerOfPoint[pointIndex];
+      if (owner !== null && !owner.isCity && volume.publicBuildingOfPoint[pointIndex] === 0 &&
+        volume.tierAt(pointIndex, 3) === TIER.classical && isATower(pointIndex)) {
         towerCount++;
       }
     }
