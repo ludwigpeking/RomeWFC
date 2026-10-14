@@ -36,7 +36,7 @@ export const MATERIAL_COLOURS = {
   canvasLinen: 0xd9cfb4,
   grass: 0x8a9a5b,        // a garden
   // the fields round the town: young corn, ripe corn, olives, fallow earth
-  fieldGreen: 0x8e9e52,
+  fieldGreen: 0x8a9a5b,   // (the yellow-green of the gardens, since 2026-10-13; 0x8e9e52 before)
   fieldStraw: 0xc9b56a,
   fieldOlive: 0x9aa070,
   fieldFallow: 0xb8a583,

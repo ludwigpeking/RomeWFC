@@ -22,3 +22,9 @@ film/preview_frames/
 
 # set aside: earlier preview clips and the earlier recording of the narration
 archive/
+
+# the devlog of the film (1.5 GB of media), the recorded narration of the parameter film, its sample plans, and the save slots of the server
+film/devlog/
+film/parameter_voice/
+film/plan_samples/
+saves/

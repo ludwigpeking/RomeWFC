@@ -41,7 +41,7 @@
 
 import { TIER, WORK, SeededRandom } from './volume';
 import { nameOfHousehold } from './names';
-import { pointsOfPublicBuilding, createCity, runTheCity, householdsWithoutWater, CITY_PARAMETER_DEFAULTS } from './city';
+import { pointsOfPublicBuilding, createCity, runTheCity, householdsWithoutWater, moneyTheCityMaySpend, CITY_PARAMETER_DEFAULTS } from './city';
 
 // The parameters a settlement is run with, and what they are when nothing else is asked for.
 // (A "day" is one step of the simulation; a year is daysInAYear of them: ASSUMED 360.)
@@ -60,8 +60,10 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   requiredYieldEachYear: 0.03,
   backwardTileUtility: 0.7,          // a tile with no street beside it, on top of the utility of its level
   roofTerraceUtility: 0.3,           // a roof terrace, on top of the utility of its level
-  bonusWithAClassicalPortal: 1.1,    // on the house tiles of a property that has a classical ground floor under a house
-  bonusWithAClassicalTop: 1.15,      // ... that has a classical top floor on a house (a little more than the portal: a top floor serves fewer tiles)
+  // a classical ground floor under a house (a portal) raises every tile of its property, once:
+  // a second portal in the property is an ordinary classical tile (the author, 2026-10-12)
+  bonusWithAClassicalPortal: 1.1,
+  bonusWithAClassicalTop: 1.15,      // ... a classical top floor on a house, the same way (a little more: a top floor serves fewer tiles)
   // the garden of a property raises every tile of it: this much for each cell of garden up to so
   // many cells, and only this much for each cell beyond (a garden too large adds little more)
   gardenBonusForEachCell: 0.08,
@@ -70,7 +72,7 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   towerBonusForEachLevel: 1.02,      // on every tile of a property with a tower: this × (the tower's levels − levelsBeforeTheTowerBonus)
   levelsBeforeTheTowerBonus: 6,
   vacantLandFactor: 1.0,             // vacant ground is worth the value of its location × this (1.5 until 2026-10-09: too dear to buy)
-  streetLandFactor: 4,               // ... and a street × this
+  streetLandFactor: 2,               // ... and a street × this (4 until 2026-10-12: the author wants the streets taken more often; round 2 showed the price to be the brake)
   farmlandValue: 30,                 // ASSUMED: what a point of farmland is worth; no property and no land is worth less
   managementLossPerCell: 0.05,       // the rent of a point falls by this for each cell it lies from its household's home
   acquisitionPremium: 0.4,           // somebody else's property is bought at its value and this much more (so that vacant land is the better buy)
@@ -80,6 +82,11 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   farmYieldEachDay: 0.06,            // what a farmer takes in a day from each parcel of farmland near it, shared with the other farmers there
   locationValueOfAMerchant: 960,      // a farmer whose home stands on a location of this value turns merchant
   daysBetweenInvestmentSearches: 7,
+  // fortune: now and then a household wins or loses a share of its wealth (money and property)
+  // at random, so that households grow apart; a loss beyond the money in hand is a debt, paid
+  // off from the rents
+  chanceOfAFortuneEachDay: 1 / 90,   // about four times a year
+  fortuneShareOfWealthAtMost: 0.3,   // won or lost at most this share of the wealth (2026-10-10: 30% asked, to see a clear disparity)
   householdsForEachTower: 120,       // the town has room for one tower (a classical block over three levels) for every so many households
   // ASSUMED: a tower is built for its own sake, not for its rent: a household rich enough (its
   // money so many times the cost of the next level) raises one when it may, taking a loss of up
@@ -88,6 +95,10 @@ export const SETTLEMENT_PARAMETER_DEFAULTS = {
   towerYieldAccepted: -0.06,
   chanceOfRaisingATower: 0.25,
   journeysPerHouseholdEachDay: 0.35,
+  // the venues send out journeys of their own: visitors leaving a venue for another venue, the
+  // forum or another town, so many a day for each unit of the venue's draw (the author,
+  // 2026-10-13: the institutions are to make much more traffic; a circus of draw 5 sends 10 a day)
+  visitorsEachDayForEachDrawOfAVenue: 2,
   chanceOfAnArrivalEachDay: 0.45,
   mostGroundSettled: 0.45,           // share of the points that may be built on
   trafficKeptEachDay: 0.999,         // of the traffic value
@@ -116,13 +127,19 @@ const BONUS_OF_TYPE = { [TIER.temporary]: 0.7, [TIER.vernacular]: 1, [TIER.class
 const influenceEdges = 3;                // the circle of influence of traffic and of security: so many edges
 const MOST_LEVELS_OF_TIER = { [TIER.temporary]: 2, [TIER.vernacular]: 6, [TIER.classical]: 3 };
 const mostLevelsOfATower = 10;
-const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 4 };
+// (the author, 2026-10-13: the institutions are to bring much more security and traffic than
+// they did; a public building raised it by 4 within three edges of its middle point until then)
+const SECURITY_BOOST = { farmer: 2, merchant: 1, publicBuilding: 10, fountain: 5 };
 const stepsOfASecurityBoost = influenceEdges;       // a household raises the security this many steps round its home
-const stepsOfAPublicSecurityBoost = influenceEdges; // ... and a public building
+// ... an institution raises it in two rings round every point of it: twice its boost within the
+// first so many steps, once within the second (three rings of 12, to six steps, made the ground
+// round the institutions so dear that the city could pay for its works no more: one fountain
+// instead of four by day 1,400 on the square ground of 40, seed 4005)
+const RINGS_OF_AN_INSTITUTION_SECURITY_BOOST = { publicBuilding: [3, 5], fountain: [2, 4] };
 const stepsOfFarmland = 5;               // a farmer works the land this many steps round it
 const tradeRouteWeight = 12;
-const JOURNEY_WEIGHT = { farmer: 1, merchant: 2 };
-const DRAW_OF_A_VENUE = { circus: 5, amphitheatre: 4, theatre: 3, basilica: 3, pantheon: 3, temple: 2 };
+const JOURNEY_WEIGHT = { farmer: 1, merchant: 2, visitor: 2 }; // (a visitor: a journey that sets out from a venue)
+const DRAW_OF_A_VENUE = { circus: 5, amphitheatre: 4, theatre: 3, basilica: 3, pantheon: 3, temple: 2, fountain: 3 };
 const mostJourneysToShow = 400;
 
 // Streets. The recent traffic of a point is its journeys, the older ones counting less every day.
@@ -136,14 +153,19 @@ const pressureKeptEachDay = 0.995;
 // The data layers have fixed bands: a point is coloured by the highest of these values that its own
 // reaches (below the first: nothing shown, or the palest). Each band is twice the one before.
 export const LAYER_BANDS = {
-  journeys: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],   // traffic value
+  journeys: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000], // traffic value (to 256000: a mature town passes 32000 nearly everywhere, 2026-10-13)
   security: [1, 2, 4, 8, 16, 32, 64],                           // security above the bare ground's 1
   location: [25, 50, 100, 200, 400, 800, 1600, 3200],           // value of a location, a tile
-  landPrice: [2, 4, 8, 16, 32, 64, 128, 256],                   // land value, a square metre
+  landPrice: [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048],     // land value, a square metre (to 2048: a mature town passes 256 nearly everywhere, 2026-10-12)
   worth: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],      // a parcel's worth
   rent: [10, 20, 40, 80, 160, 320, 640, 1280],                  // rent of a point, a year
   money: [250, 500, 1000, 2000, 4000, 8000, 16000, 32000],      // what a household holds
 };
+// the kinds of ground the land-use layer tells apart (the masterplan; the author, 2026-10-12):
+// private ground with its gardens, the streets, the open space nobody holds, the public buildings.
+// The works (wall, gates, aqueduct, fountains) are not a kind of ground: the plan draws them over
+// the ground they stand on (main.js)
+export const LAND_USE_KINDS = ['private', 'street', 'open', 'public'];
 
 let parametersInUse = Object.assign({}, SETTLEMENT_PARAMETER_DEFAULTS);
 
@@ -241,6 +263,11 @@ export class Settlement {
     this.gardenBuiltOverCount = 0;
     this.buildingTurnedToGardenCount = 0;
     this.farmersTurnedMerchantCount = 0;
+    this.streetsTakenCount = 0;             // land bought that was a street (a road by its traffic) at the time
+    this.fortunesWonCount = 0;              // the random gains and losses of the households, and what they came to
+    this.fortunesLostCount = 0;
+    this.moneyWonByFortune = 0;
+    this.moneyLostByFortune = 0;
     this.investmentCountOfKind = {};
     // the city as a whole (city.js): its treasury, its buildings, its wall
     this.city = createCity();
@@ -402,13 +429,13 @@ export class Settlement {
     return features;
   }
 
-  // The bonus of a tile: of its type, and of what its property holds
+  // The bonus of a tile: of its type, and of what its property holds (a portal, a classical top,
+  // a garden, a tower), each applied once to every tile of the property (until 2026-10-12 the
+  // portal and the top raised the house tiles only)
   bonusOfTile(tier, features) {
     const parameters = parametersInUse;
     let bonus = BONUS_OF_TYPE[tier];
-    if (tier === TIER.vernacular || tier === TERRACE) {
-      bonus *= (features.hasAClassicalPortal ? parameters.bonusWithAClassicalPortal : 1) * (features.hasAClassicalTop ? parameters.bonusWithAClassicalTop : 1);
-    }
+    bonus *= (features.hasAClassicalPortal ? parameters.bonusWithAClassicalPortal : 1) * (features.hasAClassicalTop ? parameters.bonusWithAClassicalTop : 1);
     if (features.gardenCellCount > 0) {
       const cellsWithFullBonus = Math.min(features.gardenCellCount, parameters.gardenCellsWithFullBonus);
       bonus *= 1 + parameters.gardenBonusForEachCell * cellsWithFullBonus + parameters.gardenBonusForEachCellBeyond * (features.gardenCellCount - cellsWithFullBonus);
@@ -561,6 +588,13 @@ export class Settlement {
     for (let journey = 0; journey < journeyCount; journey++) {
       volumeChanged = this.travel() || volumeChanged;
     }
+    // the visitors of the venues, setting out from them
+    for (const venue of this.venues()) {
+      const visitorCount = Math.floor(venue.draw * parameters.visitorsEachDayForEachDrawOfAVenue + this.random.nextFloat());
+      for (let visitor = 0; visitor < visitorCount; visitor++) {
+        volumeChanged = this.travel(venue) || volumeChanged;
+      }
+    }
     // the streets: busy is measured against the busiest point of the town
     let highestRecentTraffic = 0;
     for (let pointIndex = 0; pointIndex < this.traffic.length; pointIndex++) {
@@ -586,6 +620,7 @@ export class Settlement {
         return;
       }
       settlement.keepTheBooks(household);
+      settlement.fortunePerhaps(household);
       if (household.livelihood === 'farmer' && settlement.locationValueAt(household.homePoint) >= parameters.locationValueOfAMerchant) {
         household.livelihood = 'merchant'; // the land it lives on has become too dear to farm
         settlement.farmersTurnedMerchantCount++;
@@ -597,6 +632,27 @@ export class Settlement {
     });
     volumeChanged = runTheCity(this) || volumeChanged;
     return volumeChanged;
+  }
+
+  // Fortune: with a small chance each day a household wins or loses a share of its wealth (its
+  // money and the value of its property), drawn evenly between a loss and a gain of
+  // fortuneShareOfWealthAtMost. A loss beyond the money in hand leaves a debt (money below zero),
+  // paid off from the rents; nothing is bought until it is.
+  fortunePerhaps(household) {
+    const parameters = this.parameters;
+    if (this.random.nextFloat() >= parameters.chanceOfAFortuneEachDay) {
+      return;
+    }
+    const wealth = Math.max(0, household.money) + (household.worth || 0);
+    const fortune = wealth * parameters.fortuneShareOfWealthAtMost * (2 * this.random.nextFloat() - 1);
+    household.money += fortune;
+    if (fortune >= 0) {
+      this.fortunesWonCount++;
+      this.moneyWonByFortune += fortune;
+    } else {
+      this.fortunesLostCount++;
+      this.moneyLostByFortune -= fortune;
+    }
   }
 
   // A household's day in money: rent and, for a farmer, the yield of the farmland come in; tax
@@ -691,9 +747,22 @@ export class Settlement {
     return found;
   }
 
-  // A public building raises the security round it
-  raiseSecurityForAPublicBuilding(pointIndex) {
-    this.raiseSecurity(pointIndex, SECURITY_BOOST.publicBuilding, stepsOfAPublicSecurityBoost);
+  // An institution (a public building, a fountain with its square) raises the security round it:
+  // every point within so many steps of any point of it, each once
+  raiseSecurityForAnInstitution(pointIndices, kind) {
+    const settlement = this;
+    const rings = RINGS_OF_AN_INSTITUTION_SECURITY_BOOST[kind];
+    const timesRaised = new Map(); // a point: how many times the boost it gets (3 nearest, 2, 1)
+    pointIndices.forEach(function (pointIndex) {
+      rings.forEach(function (steps, ringNumber) {
+        settlement.pointsWithinSteps(pointIndex, steps).forEach(function (nearPoint) {
+          timesRaised.set(nearPoint, Math.max(timesRaised.get(nearPoint) || 0, rings.length - ringNumber));
+        });
+      });
+    });
+    timesRaised.forEach(function (times, nearPoint) {
+      settlement.security[nearPoint] = Math.max(1, settlement.security[nearPoint] + times * SECURITY_BOOST[kind]);
+    });
   }
 
   // Security raised (or, with a negative amount, taken away) round a point
@@ -783,54 +852,16 @@ export class Settlement {
   }
 
   // Whether a point may be taken by a household: free, not on the rim, not kept open or under a
-  // work, and leaving every building beside it some open ground. A road only where its traffic is
-  // not that of a busy street (isRoadAllowed).
+  // work. A road only where its traffic is not that of a busy street (isRoadAllowed). A taker may
+  // wall a neighbour in (the author, 2026-10-12: "let them occupy"): the neighbour's way out is
+  // recovered by the traffic, which presses on what stands in the way and has it pulled down, and
+  // the passage the city opens then stays open (isAGuaranteedPassage). Until 2026-10-12 a point
+  // could be taken only where it and every building beside it kept free ground reaching a road.
   mayTake(pointIndex, isRoadAllowed) {
     if (!this.isFree(pointIndex) || this.isKeptOpen[pointIndex] || this.isAGuaranteedPassage[pointIndex] || this.volume.works[pointIndex] !== 0 || this.map.points[pointIndex].isOnBoundary) {
       return false;
     }
-    if (this.isRoad(pointIndex) && (!isRoadAllowed || this.volume.streetGrades[pointIndex] === STREET_GRADE.busyStreet)) {
-      return false;
-    }
-    // ... and leaving itself and every building beside it free ground that still reaches a road
-    // (not a pocket walled in by buildings), so that nobody is left without a way out
-    const settlement = this;
-    function keepsAWayOut(ofPoint) {
-      return settlement.freeGroundReachesARoad(ofPoint, pointIndex);
-    }
-    return keepsAWayOut(pointIndex) && this.neighboursOfPoint[pointIndex].every(function (neighbourPoint) {
-      return settlement.isFree(neighbourPoint) || keepsAWayOut(neighbourPoint);
-    });
-  }
-
-  // Whether the free ground beside a point reaches a road (or the rim of the map) within a few
-  // steps over free ground, with one point (exceptPoint) counted as taken
-  freeGroundReachesARoad(ofPoint, exceptPoint) {
-    const stepLimit = 6;
-    const seen = new Set([exceptPoint, ofPoint]);
-    let ring = [];
-    for (const neighbourPoint of this.neighboursOfPoint[ofPoint]) {
-      if (neighbourPoint !== exceptPoint && this.isFree(neighbourPoint)) {
-        seen.add(neighbourPoint);
-        ring.push(neighbourPoint);
-      }
-    }
-    for (let step = 0; step < stepLimit && ring.length > 0; step++) {
-      const next = [];
-      for (const ringPoint of ring) {
-        if (this.isRoad(ringPoint) || this.map.points[ringPoint].isOnBoundary || (this.volume.works[ringPoint] & (WORK.gate | WORK.passage)) !== 0) {
-          return true;
-        }
-        for (const neighbourPoint of this.neighboursOfPoint[ringPoint]) {
-          if (!seen.has(neighbourPoint) && this.isFree(neighbourPoint) && (this.volume.works[neighbourPoint] & WORK.wall) === 0) {
-            seen.add(neighbourPoint);
-            next.push(neighbourPoint);
-          }
-        }
-      }
-      ring = next;
-    }
-    return false;
+    return !(this.isRoad(pointIndex) && (!isRoadAllowed || this.volume.streetGrades[pointIndex] === STREET_GRADE.busyStreet));
   }
 
   // What the city asks for a free point: the value of its land (a street is worth much more)
@@ -1135,6 +1166,9 @@ export class Settlement {
     }
     if (best.kind === 'buyLandAndBuild') {
       const landCost = this.landPriceToPay(best.pointIndex);
+      if (this.isRoad(best.pointIndex)) {
+        this.streetsTakenCount++;
+      }
       this.buyLand(best.pointIndex, household);
       household.money -= best.cost - landCost;
     } else {
@@ -1157,11 +1191,14 @@ export class Settlement {
   // The venues people travel to: the city's buildings, each with its points and its draw
   venues() {
     const publicBuildings = this.volume.publicBuildings;
+    const fountains = this.volume.fountains || [];
     const venueBuildings = publicBuildings.filter(function (building) { return DRAW_OF_A_VENUE[building.kind] !== undefined; });
-    if (!this.venuesKnown || this.venuesKnown.length !== venueBuildings.length) {
+    if (!this.venuesKnown || this.venuesKnown.length !== venueBuildings.length + fountains.length) {
       this.venuesKnown = venueBuildings.map(function (building) {
         return { isVenue: true, kind: building.kind, draw: DRAW_OF_A_VENUE[building.kind], pointIndices: pointsOfPublicBuilding(building) };
-      });
+      }).concat(fountains.map(function (fountain) { // (a fountain with its square draws people like a public building)
+        return { isVenue: true, kind: 'fountain', draw: DRAW_OF_A_VENUE.fountain, pointIndices: fountain.pointIndices };
+      }));
     }
     return this.venuesKnown;
   }
@@ -1198,12 +1235,25 @@ export class Settlement {
     if (choice < 0.7) {
       return aVenue();
     }
-    // a household of worth: of a few, each as likely as its worth
+    return this.aHouseholdOfWorth(household) || aVenue();
+  }
+
+  // Where a visitor leaving a venue goes: to another venue, to another town, or to the forum,
+  // one as likely as another (public places, along the streets of the town; not to a household,
+  // whose walled-in parcels would have the city open ways through buildings for every visitor)
+  destinationForAVisitor(venue) {
+    const places = this.venues().filter(function (other) { return other !== venue; }).concat(this.otherTowns, [this.forum]);
+    return places[this.random.nextInt(places.length)];
+  }
+
+  // A household of worth, other than one: of a few drawn at random, each as likely as its worth;
+  // null where there is none
+  aHouseholdOfWorth(except) {
     let totalWorth = 0;
     const candidates = [];
     for (let candidateNumber = 0; candidateNumber < 6; candidateNumber++) {
       const candidate = this.households[this.random.nextInt(this.households.length)];
-      if (candidate !== household) {
+      if (candidate !== except) {
         candidates.push(candidate);
         totalWorth += candidate.worth || 1;
       }
@@ -1215,7 +1265,7 @@ export class Settlement {
         return candidate;
       }
     }
-    return candidates.length > 0 ? candidates[candidates.length - 1] : aVenue();
+    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
   }
 
   // Traffic left along a way: on the points of the way, and its weight on the traffic value of
@@ -1235,13 +1285,14 @@ export class Settlement {
   // be (each costing as many steps); it has to go round them, and the difference presses on them.
   // A building whose pressure outgrows its worth is bought by the city and pulled down. Where no
   // way is left at all, the city opens one at once through the cheapest building. Returns
-  // whether the volume changed.
-  travel() {
+  // whether the volume changed. venue: the journey is a visitor's, setting out from that venue
+  // for another public place.
+  travel(venue) {
     if (this.households.length === 0) {
       return false;
     }
-    const origin = this.households[this.random.nextInt(this.households.length)];
-    const destination = this.destinationFor(origin);
+    const origin = venue || this.households[this.random.nextInt(this.households.length)];
+    const destination = venue ? this.destinationForAVisitor(venue) : this.destinationFor(origin);
     if (destination === null || destination === origin) {
       return false;
     }
@@ -1251,6 +1302,9 @@ export class Settlement {
     let buildingFell = false;
     if (wished !== null && wished.crossedBuildings.length > 0) {
       taken = this.findWay(origin, destination, false);
+      if (taken === null && venue) {
+        return false; // a visitor finding no way turns back: the city opens ways for its households only
+      }
       if (taken === null) {
         // no way left: the city opens one through the cheapest of the buildings in the way
         let cheapest = -1;
@@ -1272,9 +1326,9 @@ export class Settlement {
             return;
           }
           settlement.pressure[pointIndex] += stepsSaved;
-          // (the city buys the building only when it has the money for it)
+          // (the city buys the building only when it may spend the money, its debt allowed)
           const worth = settlement.worthAsParcel(pointIndex);
-          if (settlement.pressure[pointIndex] * parametersInUse.moneyWorthOfAStepSaved >= worth && settlement.city.money >= worth) {
+          if (settlement.pressure[pointIndex] * parametersInUse.moneyWorthOfAStepSaved >= worth && moneyTheCityMaySpend(settlement) >= worth) {
             settlement.breakDown(pointIndex);
             buildingFell = true;
           }
@@ -1284,7 +1338,7 @@ export class Settlement {
     if (taken === null || origin.pointIndices.length === 0) {
       return buildingFell;
     }
-    this.leaveTraffic(taken.points, JOURNEY_WEIGHT[origin.livelihood]);
+    this.leaveTraffic(taken.points, JOURNEY_WEIGHT[origin.livelihood] || JOURNEY_WEIGHT.visitor);
     this.journeyCount++;
     if (destination.isVenue) {
       this.journeysToVenues++;
@@ -1307,8 +1361,8 @@ export class Settlement {
 
   // The way from one place to another that costs the least: a step onto a point costs from 1 (the
   // first time it is trodden) down to half; a building of somebody else, where it may be crossed,
-  // costs as many steps more. Nobody walks through the wall (only its gates), a fountain, or what
-  // the city has built. A place is a household, a venue, the forum or another town: anything with
+  // costs as many steps more. Nobody walks through the wall (only its gates) or what the city has
+  // built; the square of a fountain is crossed like a street. A place is a household, a venue, the forum or another town: anything with
   // pointIndices. Returns { points, cost, crossedBuildings }, or null where there is no way.
   findWay(origin, destination, mayCrossBuildings) {
     const settlement = this;
@@ -1319,7 +1373,7 @@ export class Settlement {
     const stepsABuildingCosts = parametersInUse.stepsABuildingCosts;
     function mayStepOnto(pointIndex) {
       const works = settlement.volume.works[pointIndex];
-      if ((works & WORK.wall) !== 0 || (works & WORK.fountain) !== 0) {
+      if ((works & WORK.wall) !== 0) {
         return false;
       }
       if ((works & WORK.passage) !== 0) {
@@ -1538,7 +1592,7 @@ export class Settlement {
   layerValueAt(layerName, pointIndex) {
     const household = this.ownerOfPoint[pointIndex];
     if (household !== null && household.isCity) {
-      return null;
+      return layerName === 'use' ? 'public' : null;
     }
     // (a layer has fixed bands: a value has the same colour on any day and in any town)
     function inFixedBands(value, layerOfBands) {
@@ -1575,8 +1629,26 @@ export class Settlement {
       const stack = household === null ? [] : stackOf(this.volume, pointIndex);
       return stack.length > 0 && stack[0] !== TIER.garden ? stack.length / MOST_LEVELS_OF_TIER[TIER.vernacular] : null;
     }
+    if (layerName === 'use') {
+      // the kind of ground, by name (LAND_USE_KINDS), for the masterplan
+      if (this.volume.publicBuildingOfPoint[pointIndex] !== 0 || (this.volume.works[pointIndex] & WORK.fountain) !== 0) {
+        return 'public'; // (a public building, or a fountain with its square)
+      }
+      if (household === null) {
+        return this.isRoad(pointIndex) ? 'street' : 'open';
+      }
+      return 'private';
+    }
     if (household === null) {
       return null;
+    }
+    if (layerName === 'holding') {
+      // the owner, so that the boundaries of the holdings can be drawn (main.js)
+      return household.number;
+    }
+    if (layerName === 'arrival') {
+      // when the owner arrived: pale the oldest families, red the newcomers
+      return this.dayCount > 0 ? Math.max(0, Math.min(1, household.dayOfArrival / this.dayCount)) : 0;
     }
     if (layerName === 'owners') {
       return household.number;
@@ -1634,6 +1706,15 @@ export class Settlement {
       sorted.forEach(function (value, index) { weighted += (index + 1) * Math.max(0, value); });
       return (2 * weighted) / (sorted.length * total) - (sorted.length + 1) / sorted.length;
     }
+    // the share of all the wealth that the richest tenth of the households hold
+    function shareOfTheRichestTenth(values) {
+      const sorted = values.slice().sort(function (first, second) { return second - first; });
+      const total = sorted.reduce(function (sum, value) { return sum + value; }, 0);
+      const richCount = Math.ceil(sorted.length / 10);
+      return total > 0 ? sorted.slice(0, richCount).reduce(function (sum, value) { return sum + value; }, 0) / total : 0;
+    }
+    // wealth: the property and the money in hand (a debt counts as no money)
+    const wealths = worths.map(function (worth, index) { return worth + Math.max(0, moneys[index]); });
     // how evenly the blocks are spread over their kinds: 0 all of one kind, 1 evenly over all
     const kinds = Object.keys(countOfKind);
     const blockCount = kinds.reduce(function (sum, kind) { return sum + countOfKind[kind]; }, 0);
@@ -1691,6 +1772,13 @@ export class Settlement {
     });
     return {
       worthGini: Math.round(gini(worths) * 1000) / 1000,
+      wealthGini: Math.round(gini(wealths) * 1000) / 1000,
+      wealthShareOfTheRichestTenth: Math.round(shareOfTheRichestTenth(wealths) * 1000) / 1000,
+      fortunesWon: this.fortunesWonCount,
+      fortunesLost: this.fortunesLostCount,
+      moneyWonByFortune: Math.round(this.moneyWonByFortune),
+      moneyLostByFortune: Math.round(this.moneyLostByFortune),
+      householdsInDebt: moneys.filter(function (money) { return money < 0; }).length,
       heightFollowsLand: Math.round(heightFollowsLand * 1000) / 1000,
       levelsOnDearLand: Math.round(levelsOnDearLand * 100) / 100,
       levelsOnCheapLand: Math.round(levelsOnCheapLand * 100) / 100,
@@ -1761,6 +1849,14 @@ export class Settlement {
     const blocksOfKind = { none: 0, hut: 0, house: 0, houseWithClassicalFloors: 0, classical: 0, tower: 0, garden: 0 };
     let roadPoints = 0;
     let busyStreetPoints = 0;
+    const landUseCounts = { private: 0, street: 0, open: 0, public: 0 };
+    for (let pointIndex = 0; pointIndex < this.map.points.length; pointIndex++) {
+      landUseCounts[this.layerValueAt('use', pointIndex)]++;
+    }
+    const landUseShares = {};
+    Object.keys(landUseCounts).forEach(function (kind) {
+      landUseShares[kind] = Math.round(1000 * landUseCounts[kind] / settlement.map.points.length) / 1000;
+    });
     let levelsOfAllBlocks = 0;
     let highestBlockLevels = 0;
     let landPriceOfAll = 0;
@@ -1819,6 +1915,15 @@ export class Settlement {
       shareOfJourneysToOtherTowns: rounded(this.journeysToOtherTowns / Math.max(1, this.journeyCount)),
       roadPoints: roadPoints,
       busyStreetPoints: busyStreetPoints,
+      // the share of the ground in use (streets and parcels) that is street
+      streetShareOfTheGroundInUse: rounded(roadPoints / Math.max(1, roadPoints + settledPoints)),
+      // the land use over the whole map, as shares of its points (the author, 2026-10-13): private
+      // ground with its gardens, streets, open space nobody holds, public buildings (the fountains
+      // with their squares among them); the aqueduct and the wall count as the ground under them
+      landUsePrivate: landUseShares.private,
+      landUseStreet: landUseShares.street,
+      landUseOpen: landUseShares.open,
+      landUsePublic: landUseShares.public,
       shopFronts: shopFronts,
       buildingsBrokenThrough: this.brokenBuildingCount,
       buildingsClearedBeforeMonuments: this.clearedBuildingCount,
@@ -1833,6 +1938,10 @@ export class Settlement {
       taxCollected: Math.round(this.city.moneyCollected),
       moneySpentByTheCity: Math.round(this.city.moneySpent),
       citySpentOn: JSON.stringify(this.city.spentOn || {}),
+      householdsInDebt: this.households.filter(function (household) { return household.money < 0; }).length,
+      streetsTaken: this.streetsTakenCount,
+      fortunesWon: this.fortunesWonCount,
+      fortunesLost: this.fortunesLostCount,
     };
   }
 
@@ -1871,7 +1980,7 @@ export class Settlement {
       isKeptOpen: Array.from(this.isKeptOpen), isAGuaranteedPassage: Array.from(this.isAGuaranteedPassage),
       levelCount: this.volume.levelCount, tiers: Array.from(this.volume.tiers), owners: Array.from(this.volume.owners),
       streetGrades: Array.from(this.volume.streetGrades), shopFronts: shopFronts, roofTerraces: Array.from(this.volume.roofTerraces),
-      works: Array.from(this.volume.works), publicBuildings: this.volume.publicBuildings,
+      works: Array.from(this.volume.works), publicBuildings: this.volume.publicBuildings, fountains: this.volume.fountains,
       publicBuildingOfPoint: Array.from(this.volume.publicBuildingOfPoint),
       city: {
         money: Math.round(this.city.money), fountainPoints: this.city.fountainPoints, moneyCollected: Math.round(this.city.moneyCollected),
@@ -1938,6 +2047,7 @@ export class Settlement {
     if (saved.works) {
       volume.works.set(saved.works);
       volume.publicBuildings = saved.publicBuildings;
+      volume.fountains = saved.fountains || [];
       volume.publicBuildingOfPoint.set(saved.publicBuildingOfPoint);
       Object.assign(settlement.city, saved.city);
       settlement.isWithinWalls.set(saved.isWithinWalls);

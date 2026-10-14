@@ -110,7 +110,7 @@ trafficValue = traffic on the path registered to a shorter influence circle (con
 securityValue = each establishment registered to a shorter influence circle (consider 3 edges)
 Utility: onStreet 1; second floor 0.6; third 0.5; fourth 0.4; fifth 0.35; sixth 0.3;
          backward tile, no street access x0.7; roof terrace x0.3 (a tile block with its own cost and utility)
-Bonus:   T3 x0.7; T2 x1; T1 x1.3; T2 with T1 portal in property x1.1; T2 with T1 top in property x1.1;
+Bonus:   T3 x0.7; T2 x1; T1 x1.3; T1 portal in property x1.1 on every tile; T1 top in property x1.15 on every tile (2026-10-12, see below);
          with garden in property x1.15; with tower 1.02 x (towerLevel - 6), tower at most 15 levels
 tileConstructionCost = TypeBase x CostLevelMultiplier
 TypeBase: T3 0.3; T2 1; T1 3; garden 0.5; roof terrace 0.3
@@ -173,3 +173,54 @@ What the code assumes to run it (ASSUMED in settlement.js):
   may be taken only where it and every building beside it keep free ground that reaches a road
   within six steps. The city's spending is kept by cause (spentOn: public buildings, their sites,
   the squares, the aqueduct, the wall and its clearing, forced and pressure demolitions).
+- 2026-10-10, fortune: the author asks for some random gain and loss to the wealth of a
+  household, so that the population grows further apart. About four times a year
+  (chanceOfAFortuneEachDay 1/90) a household wins or loses a share of its wealth (money in hand
+  plus the value of its property), drawn evenly between -30% and +30%
+  (fortuneShareOfWealthAtMost, raised from a first idea of 10% to make the effect plain). A loss
+  beyond the money in hand is a debt: money below zero, paid off from the rents, and nothing is
+  bought meanwhile. Counted in the statistics: fortunesWon/Lost, moneyWon/LostByFortune,
+  householdsInDebt, and wealthGini (money and property together) beside worthGini.
+
+- 2026-10-12 (the author): the bonus of a T1 ground floor (a portal) applies to the whole property,
+  like the garden's: every tile of the property, classical ones included. It is earned once: a
+  second T1 ground floor in the same property is an ordinary T1 tile with no bonus of its own.
+  (Until then the portal and the classical top raised the vernacular tiles and terraces only.)
+  The classical top floor is treated the same way. A property is the connected holding of one
+  household.
+
+- 2026-10-12 (the author), the streets: the street land factor is 2 (was 4): round 2 of the
+  experiments showed the price to be what kept the streets from being taken (halving it tripled
+  the takings). And the way-out rule of 2026-10-10 is gone: a household may take a point even
+  where that walls a neighbour in. "Let them occupy": the neighbour's way out is recovered when
+  its traffic presses on what stands in the way and has it pulled down, and the passage the city
+  opens stays open for good. The city pays for those demolitions, as before.
+
+- 2026-10-13 (the author), the institutions: they are to bring much more security and traffic.
+  A public building now raises the security by 20 within three edges of every point of it and by
+  10 within five (was 4 within three edges of its middle point only); a fountain by 10 within two
+  edges and 5 within four. The venues send
+  out journeys of their own: visitors leaving a venue for another venue, the forum or another
+  town, visitorsEachDayForEachDrawOfAVenue (2) a day for each unit of the venue's draw (a circus
+  of draw 5 sends 10 a day), on top of the households' journeys; they press on buildings in the
+  way as the others do, but a visitor who finds no way turns back (the city opens ways for its
+  households only; visitors bound for households had the city pay for twice the forced
+  demolitions, 3.4M against 1.35M by day 1,400 on the square ground of 40, seed 4005). The fountain: a basin with a square before it on a patch of three by two
+  points, the aqueduct ending at the middle of the back row; the square is crossed like a street,
+  counts as public ground, and draws people as a venue (draw 3). Where the irregular ground has
+  no such patch, a fountain of one point as before.
+
+- 2026-10-13 (the author): the city can have debt. Its works (fountains, wall, public buildings)
+  and the buildings it buys under the pressure of the traffic no longer wait for the money in
+  hand: it may spend while its money stays above yearsOfTakingsTheCityMayOwe (5) years of its
+  takings below zero (its takings a year: all it took in so far, over its age). Forced
+  demolitions never waited. Until then the fountains and the buildings came only in the years
+  the treasury was in the black, which on a small ground were few.
+
+- 2026-10-13 (the author): houses were built hard against the public buildings and the fountains.
+  The ring of points round an institution (every point sharing a quad with one of its points) is
+  now cleared and kept open, like the square before a monument's front.
+
+- 2026-10-13 (the author): when a new outer wall is built, the old inner wall is torn down where
+  the new one does not stand on it; its ground is free again, for the city to sell. (Until then
+  the walls that stood stayed, and the town kept its inner ring.)

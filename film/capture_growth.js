@@ -40,6 +40,25 @@ const SHOTS = {
     dayCount: 4500, frameCount: 700, layers: ["none", "location", "height"],
     camera: { startAngle: 2.2, turn: -0.9, startDistance: 2.5, endDistance: 1.8, elevation: 0.5, fieldOfView: 30 },
   },
+  // the growth on the irregular ground of 18 rings, the camera going slowly once round the town
+  // (the author, 2026-10-13: a recording of a growth simulation), 60 seconds at 30 frames
+  irregularGrowth18: {
+    kind: "growth", ground: "irregular", seed: 3003, pointsAlongASide: 80, ringCount: 18, parameters: {},
+    dayCount: 4500, frameCount: 1800, layers: ["none"],
+    camera: { startAngle: 0.4, turn: 2 * Math.PI, startDistance: 2.4, endDistance: 1.7, elevation: 0.48, fieldOfView: 30 },
+  },
+  // two larger grounds, more days, a slower turn (the author, 2026-10-13): 100 seconds each, the
+  // camera ending far enough out to hold the whole town (at 1.7 the town of 18 rings ran out of the frame)
+  hexGrowth24: {
+    kind: "growth", ground: "irregular", seed: 3004, pointsAlongASide: 90, ringCount: 24, parameters: {},
+    dayCount: 6000, frameCount: 3000, layers: ["none"],
+    camera: { startAngle: 0.4, turn: 2 * Math.PI, startDistance: 2.6, endDistance: 2.2, elevation: 0.48, fieldOfView: 30 },
+  },
+  squareGrowth90: {
+    kind: "growth", ground: "square", seed: 3005, pointsAlongASide: 90, ringCount: 24, parameters: {},
+    dayCount: 6000, frameCount: 3000, layers: ["none"],
+    camera: { startAngle: 2.6, turn: -2 * Math.PI, startDistance: 2.6, endDistance: 2.2, elevation: 0.48, fieldOfView: 30 },
+  },
   // the grown towns from near and low, the people walking
   squareBeauty: {
     kind: "grownOrbit", ground: "square", seed: 2001, pointsAlongASide: 80, ringCount: 18, parameters: {},
@@ -125,13 +144,25 @@ async function main() {
         await send("Page.enable");
         await send("Runtime.enable");
         await send("Emulation.setDeviceMetricsOverride", { width: PICTURE_WIDTH, height: PICTURE_HEIGHT, deviceScaleFactor: 1, mobile: false });
-        await send("Page.navigate", { url: PAGE_ADDRESS });
-        for (let attempt = 0; attempt < 160; attempt++) {
-            await wait(250);
-            const isReady = await evaluate("Boolean(window.rome)").catch(function () { return false; });
-            if (isReady) { break; }
+        async function openThePage() {
+            await send("Page.navigate", { url: PAGE_ADDRESS });
+            for (let attempt = 0; attempt < 160; attempt++) {
+                await wait(250);
+                const isReady = await evaluate("Boolean(window.rome)").catch(function () { return false; });
+                if (isReady) { break; }
+            }
+            await wait(1500);
         }
-        await wait(1500);
+        await openThePage();
+        // A long growth: the page's memory piles up over the rebuilds (a dense town brought the
+        // Mac's Chrome down at about the 28th rebuild of the experiments), so every so many
+        // frames the run is saved, the page opened anew and the run loaded back: the settlement
+        // goes on exactly as it would have (its random state is saved with it).
+        // (100 frames for the large grounds: the page of a town of 24 rings reached 7 GB in 200
+        // frames and the Mac crawled). At every reload the run is also written to disk,
+        // <shot>/checkpoint.json, and ROME_RESUME=1 takes a shot up again from its checkpoint.
+        const framesBetweenReloads = Number(process.env.ROME_FRAMES_BETWEEN_RELOADS || 100);
+        const resumes = process.env.ROME_RESUME === "1";
 
         for (const shotName of shotNames) {
             const shot = Object.assign({}, SHOTS[shotName]);
@@ -142,21 +173,45 @@ async function main() {
                 shot.dayCount = Math.round(shot.dayCount * Math.max(frameShare, 0.3));
             }
             const shotFolder = path.join(__dirname, "footage_raw", shotName);
-            fs.rmSync(shotFolder, { recursive: true, force: true });
-            fs.mkdirSync(shotFolder, { recursive: true });
-            const frameLog = fs.createWriteStream(path.join(shotFolder, "frames.jsonl"));
+            const checkpointFile = path.join(shotFolder, "checkpoint.json");
+            let checkpoint = null;
+            if (resumes && shot.kind === "growth" && fs.existsSync(checkpointFile)) {
+                checkpoint = JSON.parse(fs.readFileSync(checkpointFile, "utf8"));
+                console.log(shotName + ": taken up again from frame " + checkpoint.frameNumber + ", day " + checkpoint.dayReached);
+            } else {
+                fs.rmSync(shotFolder, { recursive: true, force: true });
+                fs.mkdirSync(shotFolder, { recursive: true });
+            }
+            const frameLog = fs.createWriteStream(path.join(shotFolder, "frames.jsonl"), { flags: checkpoint ? "a" : "w" });
             const startTime = Date.now();
             console.log(shotName + ": " + shot.kind + ", " + shot.frameCount + " frames");
 
             if (shot.kind === "growth") {
-                const bounds = await evaluate("rome.filmPrepare(" + [JSON.stringify(shot.ground), shot.seed, shot.pointsAlongASide, shot.ringCount, JSON.stringify(shot.parameters)].join(",") + ")");
+                let bounds;
+                let dayReached = 0;
+                let firstFrame = 0;
+                if (checkpoint) {
+                    bounds = await evaluate("rome.filmLoad(" + JSON.stringify(checkpoint.run) + ")");
+                    dayReached = checkpoint.dayReached;
+                    firstFrame = checkpoint.frameNumber;
+                } else {
+                    bounds = await evaluate("rome.filmPrepare(" + [JSON.stringify(shot.ground), shot.seed, shot.pointsAlongASide, shot.ringCount, JSON.stringify(shot.parameters)].join(",") + ")");
+                }
                 await evaluate("rome.filmFaintOpacity(0.05)");
                 await evaluate("rome.filmPeople(0, false)");
-                let dayReached = 0;
-                for (let frameNumber = 0; frameNumber < shot.frameCount; frameNumber++) {
+                for (let frameNumber = firstFrame; frameNumber < shot.frameCount; frameNumber++) {
                     // the days go faster as the town gets going: few at first, more later
                     const progress = (frameNumber + 1) / shot.frameCount;
                     const dayWanted = Math.round(shot.dayCount * Math.pow(progress, 1.35));
+                    if (frameNumber > firstFrame && frameNumber % framesBetweenReloads === 0) {
+                        const run = await evaluate("rome.saveRun()");
+                        fs.writeFileSync(checkpointFile, JSON.stringify({ frameNumber: frameNumber, dayReached: dayReached, run: run }));
+                        await openThePage();
+                        await evaluate("rome.filmLoad(" + JSON.stringify(run) + ")");
+                        await evaluate("rome.filmFaintOpacity(0.05)");
+                        await evaluate("rome.filmPeople(0, false)");
+                        console.log("  frame " + frameNumber + ": the page opened anew, the run loaded back");
+                    }
                     const result = await evaluate("rome.filmAdvance(" + (dayWanted - dayReached) + ")");
                     dayReached = dayWanted;
                     const view = cameraOnItsCircle(bounds, shot.camera, frameNumber / Math.max(1, shot.frameCount - 1));

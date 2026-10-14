@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils';
-import { PointVolume, TIER, SeededRandom, levelHeightOfTier, classicalLevelHeight, placeHash } from './volume';
+import { PointVolume, TIER, WORK, SeededRandom, levelHeightOfTier, classicalLevelHeight, placeHash } from './volume';
 import { createSquareMap, createIrregularMap, shrinkOutline } from './topology';
 import { PartCollector, createMaterials, cellSize, materialsAreLoaded } from './parts';
 import { buildClassicalTier } from './classical';
@@ -20,16 +20,16 @@ import { buildVernacular } from './vernacular';
 import { buildTemporary } from './temporary';
 import { buildWorks, WALL_STYLES, DEFAULT_WALL_STYLE } from './works';
 import { buildGardens } from './gardens';
+import { facesOfPatch, stretchesOfFace } from './patches';
 import { buildCatalogue, codeOfMonument } from './catalogue';
 import { findCoplanarOverlaps } from './coplanar';
 import { Settlement, roadRecentTraffic, SETTLEMENT_PARAMETER_DEFAULTS, LAYER_BANDS } from './settlement';
-import { CITY_PARAMETER_DEFAULTS, PUBLIC_BUILDINGS } from './city';
+import { PUBLIC_BUILDINGS } from './city';
 import { MODELS } from './models';
 import { listPieceKinds, describePiece, pieceGeometry, placedPieceGeometry, measuresOfKind, minceModel } from './mince';
 
 let squarePointCount = 30;    // points along each side of the square map (chosen in the Ground tab)
-const irregularRingCount = 4; // rings of the irregular map
-let largeIrregularRingCount = 8; // rings of the large one: at 8 about as many points as the square map of 30 (chosen in the Ground tab)
+let irregularRingCount = 8;   // rings of the irregular map: at 8 about as many points as the square map of 30 (chosen in the menu)
 const levelCount = 22; // a classical tower may rise 20 levels: 100 m
 let map = null;
 let volume = null;
@@ -55,8 +55,63 @@ const camera = new THREE.PerspectiveCamera(28, window.innerWidth / window.innerH
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
 
+// The masterplan: a second camera straight above the town, orthographic, north (-z) up; it is
+// moved and zoomed, never turned. Which camera draws and picks: cameraInUse().
+const planCamera = new THREE.OrthographicCamera(-100, 100, 100, -100, 1, 2000);
+planCamera.up.set(0, 0, -1);
+const planControls = new OrbitControls(planCamera, renderer.domElement);
+planControls.enableRotate = false;
+planControls.screenSpacePanning = true;
+planControls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+planControls.enabled = false;
+let isPlanView = false;
+let groundCentreX = 0;
+let groundCentreZ = 0;
+let groundReach = 100;
+
+function cameraInUse() {
+  return isPlanView ? planCamera : camera;
+}
+
+// The plan camera over the whole ground, whatever the window's shape
+function fitThePlanCamera() {
+  // the ground fills the window above the strip of words at its foot, which would cover the map
+  const strip = document.getElementById('statusStrip');
+  const stripPixels = strip && strip.style.display !== 'none' ? strip.offsetHeight + 24 : 0;
+  const freePixels = Math.max(200, window.innerHeight - stripPixels);
+  const aspect = window.innerWidth / window.innerHeight;
+  const halfHeight = groundReach * 1.04 * window.innerHeight / freePixels;
+  const halfWidth = halfHeight * aspect;
+  const metresPerPixel = 2 * halfHeight / window.innerHeight;
+  const centreZ = groundCentreZ + stripPixels / 2 * metresPerPixel; // (the plan's up is -z: the centre moves down the screen)
+  Object.assign(planCamera, { left: -halfWidth, right: halfWidth, top: halfHeight, bottom: -halfHeight });
+  planCamera.zoom = 1;
+  planCamera.position.set(groundCentreX, 600, centreZ);
+  planControls.target.set(groundCentreX, 0, centreZ);
+  planCamera.updateProjectionMatrix();
+  planControls.update();
+}
+
+function showPlanView(isOn) {
+  if (isOn && isWalking) {
+    stopWalking();
+  }
+  isPlanView = isOn;
+  if (isOn) {
+    fitThePlanCamera();
+  }
+  controls.enabled = !isOn && !isWalking;
+  planControls.enabled = isOn;
+  // (the plan is a map: the line of numbers at the foot of the window would cover it)
+  document.getElementById('liveStatistics').style.display = isOn ? 'none' : '';
+  document.getElementById('planViewButton').classList.toggle('active', isOn);
+  document.getElementById('perspectiveViewButton').classList.toggle('active', !isOn);
+}
+document.getElementById('planViewButton').addEventListener('click', function () { showPlanView(!isPlanView); });
+document.getElementById('perspectiveViewButton').addEventListener('click', function () { showPlanView(false); });
+
 // (little light from the sky, so that what the sun does not reach is clearly darker: the faces and shadows of the walls read)
-scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x8f8068, 0.7));
+scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x8f8068, 0.9)); // (0.7 until 2026-10-13: the author wants the shadows slightly lighter)
 const sunLight = new THREE.DirectionalLight(0xfff2dc, 3.5);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(4096, 4096);
@@ -112,6 +167,12 @@ function showMap(newMap) {
   camera.position.set(centreX + reach * 2.6, reach * 2.1, centreZ + reach * 3.2);
   controls.target.set(centreX, 4, centreZ);
   controls.update();
+  groundCentreX = centreX;
+  groundCentreZ = centreZ;
+  groundReach = reach;
+  if (isPlanView) {
+    fitThePlanCamera();
+  }
   sunLight.position.set(centreX - 60, 110, centreZ + 70);
   sunLight.target.position.set(centreX, 0, centreZ);
   Object.assign(sunLight.shadow.camera, { left: -reach * 1.5, right: reach * 1.5, top: reach * 1.5, bottom: -reach * 1.5, near: 10, far: 400 });
@@ -219,7 +280,7 @@ function nearestPoint(x, z, candidatePoints) {
 
 // What lies under the pointer: { filledPlace (or null), emptyPlace (where a new block would go, or null) }
 function findUnderPointer() {
-  raycaster.setFromCamera(pointerPosition, camera);
+  raycaster.setFromCamera(pointerPosition, cameraInUse());
   const hits = raycaster.intersectObjects(pickShapes, false);
   if (hits.length > 0) {
     const place = hits[0].object.userData.place;
@@ -289,7 +350,7 @@ function showTheTownFaintOrSolid() {
 
 // The point of the ground the pointer is over, or -1
 function pointUnderPointerOnTheGround() {
-  raycaster.setFromCamera(pointerPosition, camera);
+  raycaster.setFromCamera(pointerPosition, cameraInUse());
   const groundPoint = new THREE.Vector3();
   if (!raycaster.ray.intersectPlane(groundPlane, groundPoint)) {
     return -1;
@@ -373,7 +434,7 @@ renderer.domElement.addEventListener('pointermove', function (event) {
   showHouseholdTip(event.clientX, event.clientY);
 });
 renderer.domElement.addEventListener('pointerup', function (event) {
-  if (isWalking || isADataLayerOverTheTown()) {
+  if (isWalking || isADataLayerOverTheTown() || !isBuildMode) {
     return;
   }
   if (!pointerDownPosition || Math.hypot(event.clientX - pointerDownPosition.x, event.clientY - pointerDownPosition.y) > clickMovementTolerance) {
@@ -427,20 +488,13 @@ document.getElementById('volumeButton').addEventListener('click', function () {
   this.classList.toggle('active', showsBareVolume);
   rebuildTown();
 });
-document.getElementById('forumButton').addEventListener('click', function () {
-  stopSettling();
-  settlement = null;
-  showDataLayer();
-  fillTown();
-  rebuildTown();
-});
-document.getElementById('randomButton').addEventListener('click', function () {
-  stopSettling();
-  settlement = null;
-  showDataLayer();
-  townSeed = Date.now() % 1000000;
-  fillRandomTown(townSeed);
-  rebuildTown();
+// Building by hand is a mode: on, the clicks raise and take away blocks and the tiers to build
+// with are shown; off, the clicks only read the ground
+let isBuildMode = true;
+document.getElementById('buildButton').addEventListener('click', function () {
+  isBuildMode = !isBuildMode;
+  this.classList.toggle('active', isBuildMode);
+  document.getElementById('buildTools').style.display = isBuildMode ? '' : 'none';
 });
 document.getElementById('squareMapButton').addEventListener('click', function () {
   startMap('square');
@@ -449,7 +503,13 @@ document.getElementById('irregularMapButton').addEventListener('click', function
   startMap('irregular');
 });
 
+// The ground: 'square' (with its forum, to look at the parts) or 'irregular' (empty, to settle).
+// ('largeIrregular', the name of the irregular ground in the saved runs and the tools until
+// 2026-10-13, when the small irregular ground went, is the same.)
 function startMap(kind) {
+  if (kind === 'largeIrregular') {
+    kind = 'irregular';
+  }
   stopWalking();
   peopleWalking = [];
   currentMapKind = kind;
@@ -458,16 +518,10 @@ function startMap(kind) {
   showDataLayer();
   if (kind === 'square') {
     showMap(createSquareMap(squarePointCount, squarePointCount, cellSize));
-  } else {
-    showMap(createIrregularMap(kind === 'largeIrregular' ? largeIrregularRingCount : irregularRingCount, cellSize, 7));
-  }
-  isLargeIrregularMap = kind === 'largeIrregular';
-  document.getElementById('irregularMapButton').classList.toggle('active', kind === 'irregular');
-  document.getElementById('largeIrregularMapButton').classList.toggle('active', isLargeIrregularMap);
-  if (isLargeIrregularMap) {
-    volume.clear(); // a ground to settle: it starts empty
-  } else {
     fillTown();
+  } else {
+    showMap(createIrregularMap(irregularRingCount, cellSize, 7));
+    volume.clear(); // a ground to settle: it starts empty
   }
   return rebuildTown();
 }
@@ -476,12 +530,13 @@ function startMap(kind) {
 // The settlement: a town that settles by itself (settlement.js), a few days every second
 // ---------------------------------------------------------------------------
 let settlement = null;
-let isLargeIrregularMap = false;
 let isSettling = false;
 let settlementNeedsRebuilding = false;
 let lastSettlementStepTime = 0;
 let lastSettlementRebuildTime = 0;
 let dataLayerMesh = null;
+let dataLayerLines = null;   // the lines of a layer (the boundaries of the holdings), drawn after the layer
+let dataLayerOverlay = null; // the works drawn over a plan (the aqueduct, the fountains), drawn after the layer
 const millisecondsPerDay = 60;
 const millisecondsBetweenRebuilds = 2500; // a full town takes over a second to rebuild
 
@@ -516,15 +571,18 @@ function rebuildSettledTown() {
 // darker the more they do, and larger where it counts as road); the others are drawn over the
 // town, seen through the buildings, as the patch of ground round each point.
 const DATA_LAYER_LEGENDS = {
-  journeys: 'Traffic as it enters the value of a location: the journeys that crossed a point and passed beside it, the older ones fading.',
+  journeys: 'Traffic: the journeys that crossed a point and passed beside it, the older ones fading, as it enters the value of a location.',
   traffic: 'The paths people have trodden lately that are not yet streets. Streets are cobbled, busy streets paved.',
   streets: 'Free ground by its grade: street (pale), busy street (red). Blue: ground kept open before a monument.',
   owners: 'One colour for every household: its parcel. Houses grow together only inside a parcel.',
   livelihood: 'Farmers (pale) and merchants (red).',
   security: 'Security: what the households and the public buildings bring to the ground round them (pale: little, red: much).',
   location: 'The value of a location, a square metre: traffic × security (pale: low, red: high).',
-  landPrice: 'The price of land, a square metre: property value − building value; open land as if a standard building stood on it.',
+  landPrice: 'The value of land, a square metre: property value − building value; open land as if a standard building stood on it (pale: low, red: high).',
   height: 'How many floors stand on each point (pale: one, red: six).',
+  use: 'Land use: private ground with its gardens (terracotta), streets (grey), open space (pale green), public buildings and the squares of the fountains (violet); the city wall black, open at the gates, the aqueduct a blue line, the basins of the fountains blue.',
+  holding: 'The plan of the holdings: a line round each connected property, each household in a colour of its own, gardens green; streets grey, open ground sand, public buildings violet, the city wall black, open at the gates, the aqueduct a blue line.',
+  arrival: 'When the owner of each point arrived (pale: the oldest families, red: the newcomers).',
   rent: 'What each point lets for in a day (pale: little, red: much).',
   money: 'What each household holds (pale: little, red: much).',
   worth: 'What each parcel is worth, land and building (pale: little, red: much).',
@@ -532,13 +590,140 @@ const DATA_LAYER_LEGENDS = {
   works: 'The works of the city: walls (dark), gates (gold), the aqueduct (blue), fountains (bright blue); the ground within the walls is tinted.',
   none: 'No data shown.',
 };
-let dataLayerName = 'traffic';
+let dataLayerName = 'none';
 const paleLayerColour = new THREE.Color(0xf6ecb9);
 const strongLayerColour = new THREE.Color(0xb3261e);
 const keptOpenLayerColour = new THREE.Color(0x3b82c4);
 const wallLayerColour = new THREE.Color(0x2b2622);
 const gateLayerColour = new THREE.Color(0xd9a520);
 const fountainLayerColour = new THREE.Color(0x35c6e8);
+const LAND_USE_COLOURS = { private: 0xc9633f, street: 0x8d8577, open: 0xcfd6ae, public: 0x8b74b8 };
+const holdingGroundColour = new THREE.Color(0xf3e9c8);
+const holdingGardenColour = new THREE.Color(0xd3e0b4);   // a garden, within its property's border
+// the other kinds of ground on the plan of the holdings, flat: an abstract map, nothing of the
+// view showing through (the author, 2026-10-12)
+const HOLDING_PLAN_COLOURS = { street: 0xa49c8c, open: 0xe2d8bd, public: 0x8b74b8 };
+const aqueductPlanColour = new THREE.Color(0x6fb1e4); // (0x3b82c4 until 2026-10-13: the author wants it lighter)
+const aqueductPlanWidth = 0.7;
+const fountainPlanWidth = 1.6;
+
+// The aqueduct on the plan: a blue line from each duct point to the next, over whatever ground it
+// crosses; a fountain a small blue square. Pushes triangles into positions and colours.
+function addAqueductInPlan(positions, colours) {
+  function pushQuad(corners) {
+    [[0, 1, 2], [0, 2, 3]].forEach(function (triangle) {
+      triangle.forEach(function (cornerIndex) {
+        positions.push(corners[cornerIndex][0], 0.075, corners[cornerIndex][1]);
+        colours.push(aqueductPlanColour.r, aqueductPlanColour.g, aqueductPlanColour.b);
+      });
+    });
+  }
+  // a fountain with its square: its basin, a blue bar along the back row of the square
+  const isOnASquare = new Set();
+  (volume.fountains || []).forEach(function (fountain) {
+    fountain.pointIndices.forEach(function (pointIndex) { isOnASquare.add(pointIndex); });
+    const backFirst = map.points[fountain.backRow[0]];
+    const backLast = map.points[fountain.backRow[fountain.backRow.length - 1]];
+    const end = map.points[fountain.endPoint];
+    const frontMiddle = map.points[fountain.frontRow[1]];
+    const alongLength = Math.hypot(backLast.x - backFirst.x, backLast.z - backFirst.z) || 1;
+    const alongX = (backLast.x - backFirst.x) / alongLength;
+    const alongZ = (backLast.z - backFirst.z) / alongLength;
+    const frontLength = Math.hypot(frontMiddle.x - end.x, frontMiddle.z - end.z) || 1;
+    const frontX = (frontMiddle.x - end.x) / frontLength;
+    const frontZ = (frontMiddle.z - end.z) / frontLength;
+    const halfLength = alongLength / 2 + 0.8;
+    const middleX = end.x + frontX * 1.6;
+    const middleZ = end.z + frontZ * 1.6;
+    pushQuad([[middleX - alongX * halfLength, middleZ - alongZ * halfLength], [middleX + alongX * halfLength, middleZ + alongZ * halfLength],
+      [middleX + alongX * halfLength + frontX * fountainPlanWidth, middleZ + alongZ * halfLength + frontZ * fountainPlanWidth],
+      [middleX - alongX * halfLength + frontX * fountainPlanWidth, middleZ - alongZ * halfLength + frontZ * fountainPlanWidth]]);
+  });
+  map.points.forEach(function (point, pointIndex) {
+    const works = volume.works[pointIndex];
+    if ((works & WORK.fountain) !== 0 && !isOnASquare.has(pointIndex)) {
+      const half = fountainPlanWidth / 2;
+      pushQuad([[point.x - half, point.z - half], [point.x + half, point.z - half], [point.x + half, point.z + half], [point.x - half, point.z + half]]);
+    }
+    if ((works & WORK.duct) === 0) {
+      return;
+    }
+    map.sideNeighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
+      if (neighbourPoint < pointIndex || (volume.works[neighbourPoint] & WORK.duct) === 0) {
+        return;
+      }
+      const neighbour = map.points[neighbourPoint];
+      const acrossX = neighbour.z - point.z;
+      const acrossZ = -(neighbour.x - point.x);
+      const length = Math.hypot(acrossX, acrossZ) || 1;
+      const offsetX = acrossX / length * aqueductPlanWidth / 2;
+      const offsetZ = acrossZ / length * aqueductPlanWidth / 2;
+      pushQuad([[point.x + offsetX, point.z + offsetZ], [neighbour.x + offsetX, neighbour.z + offsetZ],
+        [neighbour.x - offsetX, neighbour.z - offsetZ], [point.x - offsetX, point.z - offsetZ]]);
+    });
+  });
+}
+const holdingBoundaryColour = new THREE.Color(0x100c08);
+const holdingBoundaryWidth = 0.12;   // a hairline: a pixel at four times the zoom of a whole town of 80 (a solid pixel line looked fat beside the small parcels, the author, 2026-10-12)
+const wallPlanColour = new THREE.Color(0x000000);
+
+// The city wall on the plan, solid black: the patch of every wall point filled; a gate point is
+// left open, so that the opening shows. Pushes triangles into positions and colours.
+function addWallsInPlan(positions, colours) {
+  map.points.forEach(function (point, pointIndex) {
+    const works = volume.works[pointIndex];
+    if ((works & WORK.wall) === 0 || (works & WORK.gate) !== 0) {
+      return;
+    }
+    map.quartersOfPoint[pointIndex].forEach(function (quarter) {
+      [[0, 1, 2], [0, 2, 3]].forEach(function (triangle) {
+        triangle.forEach(function (cornerIndex) {
+          positions.push(quarter.outline[cornerIndex][0], 0.07, quarter.outline[cornerIndex][1]);
+          colours.push(wallPlanColour.r, wallPlanColour.g, wallPlanColour.b);
+        });
+      });
+    });
+  });
+}
+
+// The boundaries of the holdings: hairlines of a fixed width on the ground, so that they are a
+// faint web when the whole town is in the window and firm lines when a block is; along every face
+// of a held point's patch that looks at ground another household holds, or nobody; two
+// neighbouring holdings share the line. Returns them as a mesh.
+function holdingBoundaryLines() {
+  const positions = [];
+  map.points.forEach(function (point, pointIndex) {
+    const household = settlement.ownerOfPoint[pointIndex];
+    if (household === null || household.isCity) {
+      return;
+    }
+    facesOfPatch(map, pointIndex).forEach(function (face) {
+      if (settlement.ownerOfPoint[face.neighbourPoint] === household) {
+        return;
+      }
+      stretchesOfFace(face).forEach(function (stretch) {
+        const acrossX = stretch[1][1] - stretch[0][1];
+        const acrossZ = -(stretch[1][0] - stretch[0][0]);
+        const length = Math.hypot(acrossX, acrossZ) || 1;
+        const offsetX = acrossX / length * holdingBoundaryWidth / 2;
+        const offsetZ = acrossZ / length * holdingBoundaryWidth / 2;
+        const corners = [
+          [stretch[0][0] + offsetX, stretch[0][1] + offsetZ], [stretch[1][0] + offsetX, stretch[1][1] + offsetZ],
+          [stretch[1][0] - offsetX, stretch[1][1] - offsetZ], [stretch[0][0] - offsetX, stretch[0][1] - offsetZ],
+        ];
+        [[0, 1, 2], [0, 2, 3]].forEach(function (triangle) {
+          triangle.forEach(function (cornerIndex) {
+            positions.push(corners[cornerIndex][0], 0.09, corners[cornerIndex][1]);
+          });
+        });
+      });
+    });
+  });
+  const geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const lines = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: holdingBoundaryColour, depthTest: false, transparent: true, side: THREE.DoubleSide }));
+  lines.renderOrder = 6;
+  return lines;
+}
 
 // The streets, as ground: on every free point that is used as street, the patch of ground round
 // the point (the quarters of the quads that meet at it, so skewed with the grid), cobbled; the
@@ -561,7 +746,7 @@ function showStreets() {
   // the streets cobbled or paved; the free ground that is nobody's and no street is farmland, in
   // fields of green and straw (each point its own field, so that the fields are skewed with the grid)
   const coordinatesOfMaterial = { cobble: [], paving: [], fieldGreen: [], fieldStraw: [], fieldOlive: [], fieldFallow: [] };
-  const fieldNames = ['fieldGreen', 'fieldStraw', 'fieldOlive', 'fieldFallow'];
+  const fieldNames = ['fieldGreen']; // (one yellow-green for all the fields, as the gardens: the author, 2026-10-13; four colours until then)
   map.points.forEach(function (point, pointIndex) {
     const grade = volume.streetGrades[pointIndex];
     const isAStreet = grade > 0 || (volume.works[pointIndex] & 18) !== 0; // also a gate and the passage of an arch
@@ -609,10 +794,9 @@ function showStreets() {
 let householdHistory = []; // { day, inHuts, inHouses, classical }
 function showStatistics() {
   const line = document.getElementById('liveStatistics');
-  const table = document.getElementById('cityStatistics');
   if (settlement === null) {
     line.style.display = 'none';
-    table.innerHTML = '';
+    showStatisticCards({});
     householdHistory = [];
     drawHistory();
     return;
@@ -624,25 +808,12 @@ function showStatistics() {
     }
     householdHistory.push({ day: statistics.days, inHuts: statistics.householdsInHuts, inHouses: statistics.householdsInHouses, classical: statistics.householdsClassical });
   }
-  line.style.display = 'block';
+  line.style.display = isPlanView ? 'none' : 'block';
   line.textContent = 'Day ' + statistics.days + ' · ' + statistics.households + ' households (' + statistics.householdsInHuts + ' huts, ' +
     statistics.householdsInHouses + ' houses, ' + statistics.householdsClassical + ' classical) · treasury ' + Math.round(settlement.city.money) +
     ' · public: ' + (statistics.publicBuildings || 'none') + ' · ' + statistics.fountains + ' fountains, ' + statistics.householdsWithoutWater + ' households without water · ' +
     (statistics.wallPoints > 0 ? 'wall of ' + (statistics.wallPoints + statistics.gates) + ' points, ' + statistics.gates + ' gates' : 'no wall');
-  table.innerHTML = '';
-  const rows = [['treasury', Math.round(settlement.city.money)]];
-  Object.keys(statistics).forEach(function (name) {
-    rows.push([wordsOfName(name), statistics[name]]);
-  });
-  rows.forEach(function (row) {
-    const tableRow = document.createElement('tr');
-    row.forEach(function (text) {
-      const cell = document.createElement('td');
-      cell.textContent = text;
-      tableRow.appendChild(cell);
-    });
-    table.appendChild(tableRow);
-  });
+  showStatisticCards(Object.assign({ treasury: Math.round(settlement.city.money) }, statistics));
   const richest = document.getElementById('richestHouseholds');
   richest.innerHTML = '';
   settlement.richestHouseholds(12).forEach(function (household) {
@@ -664,8 +835,81 @@ function showStatistics() {
   drawHistory();
 }
 
+// the numbers in cards by their subject; a number of no card goes to the last
+const STATISTIC_GROUPS = [
+  ['PEOPLE', ['days', 'households', 'farmers', 'merchants', 'householdsInHuts', 'householdsInHouses', 'householdsClassical', 'householdsInDebt', 'householdsWithoutWater', 'meanMoneyOfAHousehold', 'fortunesWon', 'fortunesLost']],
+  ['HOLDINGS AND LAND', ['largestHoldingPoints', 'meanHoldingPoints', 'shareOfGroundSettled', 'gardenPoints', 'acquisitions', 'streetsTaken', 'landSoldByTheCity', 'meanLandPriceOfAParcel']],
+  ['BUILDINGS', ['hutBlocks', 'houseBlocks', 'houseBlocksWithClassicalFloors', 'classicalBlocks', 'towerBlocks', 'roofTerraces', 'mostLevelsOfABlock', 'meanLevelsOfABlock', 'investments', 'shopFronts', 'buildingsBrokenThrough', 'buildingsClearedBeforeMonuments']],
+  ['VALUE, RENT AND TAX', ['worthOfAllProperty', 'rentOfAllEachDay', 'taxCollected']],
+  ['STREETS AND TRAFFIC', ['roadPoints', 'busyStreetPoints', 'streetShareOfTheGroundInUse', 'shareOfJourneysToVenues', 'shareOfJourneysToOtherTowns']],
+  ['LAND USE', ['landUsePrivate', 'landUseStreet', 'landUseOpen', 'landUsePublic']],
+  ['THE CITY', ['treasury', 'publicBuildings', 'fountains', 'aqueductPoints', 'walls', 'wallPoints', 'gates', 'moneySpentByTheCity', 'citySpentOn']],
+  ['OTHER', []],
+];
+function addStatisticRow(card, label, value) {
+  const row = document.createElement('div');
+  row.className = 'statisticRow';
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  const valueSpan = document.createElement('span');
+  valueSpan.textContent = wordsOfStatistic(value);
+  row.appendChild(labelSpan);
+  row.appendChild(valueSpan);
+  card.appendChild(row);
+}
+// a whole number as it is, a fraction to two decimals, a large amount rounded, nothing as 'none'
+function wordsOfStatistic(value) {
+  if (value === '' || value === undefined || value === null) {
+    return 'none';
+  }
+  if (typeof value !== 'number') {
+    return String(value);
+  }
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return Math.abs(value) >= 100 ? String(Math.round(value)) : value.toFixed(2);
+}
+function showStatisticCards(statistics) {
+  const grid = document.getElementById('statisticsGroups');
+  grid.querySelectorAll('.card.numbers').forEach(function (card) { card.remove(); });
+  const firstFixedCard = document.getElementById('richestCard');
+  const namesPlaced = new Set();
+  STATISTIC_GROUPS.forEach(function (group) {
+    const names = group[1].length > 0 ? group[1].filter(function (name) { return statistics[name] !== undefined; })
+      : Object.keys(statistics).filter(function (name) { return !namesPlaced.has(name); });
+    if (names.length === 0) {
+      return;
+    }
+    const card = document.createElement('div');
+    card.className = 'card numbers';
+    const title = document.createElement('div');
+    title.className = 'cardTitle';
+    title.textContent = group[0];
+    card.appendChild(title);
+    names.forEach(function (name) {
+      namesPlaced.add(name);
+      let value = statistics[name];
+      if (typeof value === 'string' && value.charAt(0) === '{') {
+        value = JSON.parse(value); // (the numbers by kind come as JSON, for the tools)
+      }
+      if (value !== null && typeof value === 'object') { // (a number for each kind: a row for each)
+        Object.keys(value).forEach(function (kind) {
+          addStatisticRow(card, wordsOfName(name) + ': ' + wordsOfName(kind), value[kind]);
+        });
+      } else {
+        addStatisticRow(card, wordsOfName(name), value);
+      }
+    });
+    grid.insertBefore(card, firstFixedCard);
+  });
+}
+
 function drawHistory() {
   const canvas = document.getElementById('historyChart');
+  if (!canvas) {
+    return; // (the chart left the interface on 2026-10-13: it told little)
+  }
   const brush = canvas.getContext('2d');
   brush.clearRect(0, 0, canvas.width, canvas.height);
   if (householdHistory.length < 2) {
@@ -708,6 +952,18 @@ function showDataLayer() {
     dataLayerMesh.geometry.dispose();
     dataLayerMesh.material.dispose();
     dataLayerMesh = null;
+  }
+  if (dataLayerLines) {
+    scene.remove(dataLayerLines);
+    dataLayerLines.geometry.dispose();
+    dataLayerLines.material.dispose();
+    dataLayerLines = null;
+  }
+  if (dataLayerOverlay) {
+    scene.remove(dataLayerOverlay);
+    dataLayerOverlay.geometry.dispose();
+    dataLayerOverlay.material.dispose();
+    dataLayerOverlay = null;
   }
   // (a layer with fixed bands names them: the same colour for the same value, always)
   document.getElementById('dataLayerLegend').textContent = DATA_LAYER_LEGENDS[dataLayerName] +
@@ -764,10 +1020,20 @@ function showDataLayer() {
       }
     } else if (dataLayerName === 'streets' && (settlement.isKeptOpen[pointIndex] || settlement.isAGuaranteedPassage[pointIndex])) {
       colour = keptOpenLayerColour;
+    } else if (dataLayerName === 'holding') {
+      const use = settlement.layerValueAt('use', pointIndex);
+      if (use === 'private') {
+        // (each household in a pale colour of its own, its gardens green)
+        colour = volume.tierAt(pointIndex, 0) === TIER.garden ? holdingGardenColour : new THREE.Color().setHSL((value * 0.618034) % 1, 0.5, 0.8);
+      } else {
+        colour = new THREE.Color(HOLDING_PLAN_COLOURS[use]);
+      }
     } else if (value === null) {
       return;
     } else if (dataLayerName === 'owners') {
       colour = new THREE.Color().setHSL((value * 0.618034) % 1, 0.62, 0.5 + 0.12 * ((value * 7) % 3 - 1));
+    } else if (dataLayerName === 'use') {
+      colour = new THREE.Color(LAND_USE_COLOURS[value]);
     } else {
       colour = paleLayerColour.clone().lerp(strongLayerColour, value);
     }
@@ -781,19 +1047,41 @@ function showDataLayer() {
       });
     });
   });
+  if (dataLayerName === 'holding') {
+    dataLayerLines = holdingBoundaryLines();
+    scene.add(dataLayerLines);
+  }
+  addWallsInPlan(positions, colours);
+  if (dataLayerName === 'holding' || dataLayerName === 'use') {
+    // (a mesh of its own, drawn after the plan: within one mesh the line was lost under the ground)
+    const overlayPositions = [];
+    const overlayColours = [];
+    addAqueductInPlan(overlayPositions, overlayColours);
+    const overlayGeometry = new THREE.BufferGeometry();
+    overlayGeometry.setAttribute('position', new THREE.Float32BufferAttribute(overlayPositions, 3));
+    overlayGeometry.setAttribute('color', new THREE.Float32BufferAttribute(overlayColours, 3));
+    dataLayerOverlay = new THREE.Mesh(overlayGeometry, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthTest: false, side: THREE.DoubleSide }));
+    dataLayerOverlay.renderOrder = 7;
+    scene.add(dataLayerOverlay);
+  }
+  // (the holdings and the land use are abstract maps: fully covering, flat colours, nothing of
+  // the view showing through; the material stays transparent so that it is drawn after the faint
+  // town, not under it)
+  const isOpaque = dataLayerName === 'holding' || dataLayerName === 'use';
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
   dataLayerMesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 0.82, depthTest: false, side: THREE.DoubleSide }));
+    vertexColors: true, transparent: true, opacity: isOpaque ? 1 : 0.82, depthTest: false, side: THREE.DoubleSide }));
   dataLayerMesh.renderOrder = 5;
   scene.add(dataLayerMesh);
 }
 
+// a layer button shows its layer; pressed again, it takes the layer off (no button for 'none')
 document.querySelectorAll('#dataLayerButtons button').forEach(function (button) {
   button.addEventListener('click', function () {
-    dataLayerName = button.dataset.layer;
+    dataLayerName = dataLayerName === button.dataset.layer ? 'none' : button.dataset.layer;
     document.querySelectorAll('#dataLayerButtons button').forEach(function (other) {
-      other.classList.toggle('active', other === button);
+      other.classList.toggle('active', other.dataset.layer === dataLayerName);
     });
     showDataLayer();
   });
@@ -802,16 +1090,6 @@ document.querySelectorAll('#dataLayerButtons button').forEach(function (button) 
 // ---------------------------------------------------------------------------
 // The panel of settings: its tabs, the sizes of the grounds, the parameters of a settlement
 // ---------------------------------------------------------------------------
-document.querySelectorAll('#tabButtons button').forEach(function (button) {
-  button.addEventListener('click', function () {
-    document.querySelectorAll('#tabButtons button').forEach(function (other) {
-      other.classList.toggle('active', other === button);
-    });
-    document.querySelectorAll('.tabPane').forEach(function (pane) {
-      pane.classList.toggle('shown', pane.dataset.tab === button.dataset.tab);
-    });
-  });
-});
 // the line of the city wall
 (function () {
   const list = document.getElementById('wallStyleList');
@@ -833,8 +1111,8 @@ document.getElementById('squareSizeList').addEventListener('change', function ()
   startMap('square');
 });
 document.getElementById('irregularSizeList').addEventListener('change', function () {
-  largeIrregularRingCount = Number(this.value);
-  startMap('largeIrregular');
+  irregularRingCount = Number(this.value);
+  startMap('irregular');
 });
 
 // a name of the code in plain words: 'moneyKeptEachDay' -> 'money kept each day'
@@ -859,17 +1137,205 @@ function addParameterRow(container, name, value, parameterName) {
   container.appendChild(row);
   return input;
 }
-Object.keys(SETTLEMENT_PARAMETER_DEFAULTS).forEach(function (name) {
-  const isOfTheCity = Object.prototype.hasOwnProperty.call(CITY_PARAMETER_DEFAULTS, name);
-  addParameterRow(document.getElementById(isOfTheCity ? 'cityParameters' : 'householdParameters'), name, SETTLEMENT_PARAMETER_DEFAULTS[name], name);
-});
+// The parameters in cards by their subject, each opened by the first parameter of it (in the
+// order of the defaults), with a line on what the card is about
+const PARAMETER_GROUPS = [
+  { title: 'VALUES, RENT AND TAX', firstParameter: 'tileValueScale',
+    about: 'What a tile is worth from its location, what it lets for and costs to keep in a year, what the city takes in tax and on a sale, and the yield an investment has to promise.' },
+  { title: 'WHAT RAISES A PROPERTY', firstParameter: 'backwardTileUtility',
+    about: 'The utility of a tile by where it stands, and the bonuses that a classical portal or top, a garden and a tower give every tile of the property.' },
+  { title: 'LAND', firstParameter: 'vacantLandFactor',
+    about: 'What vacant ground, a street and farmland are worth, the loss on a point far from home, and the premium paid on a neighbour\'s property.' },
+  { title: 'HOUSEHOLDS AND THEIR FORTUNES', firstParameter: 'startingCapital',
+    about: 'What newcomers bring, farmers and merchants, when a farmer turns merchant, how often a household looks for an investment, and the strokes of fortune that set the families apart.' },
+  { title: 'TOWERS', firstParameter: 'householdsForEachTower',
+    about: 'How many towers the town has room for, and how rich a household has to be to raise one for its own sake.' },
+  { title: 'ARRIVALS AND TRAFFIC', firstParameter: 'journeysPerHouseholdEachDay',
+    about: 'How often people arrive and travel, how much of the ground may be built on, how traffic fades and makes a street busy, shops opening, and what a building in the way costs a journey.' },
+  { title: 'THE CITY: WATER, WALL, WORKS', firstParameter: 'householdsScaleOfPublicBuildings',
+    about: 'From how many households the city builds fountains and a wall, what its works cost it, and the scale of all the public buildings\' bars.' },
+];
+(function () {
+  const grid = document.getElementById('parameterGroups');
+  const firstFixedCard = document.getElementById('publicBuildingCard');
+  let card = null;
+  Object.keys(SETTLEMENT_PARAMETER_DEFAULTS).forEach(function (name) {
+    PARAMETER_GROUPS.forEach(function (group) {
+      if (group.firstParameter === name) {
+        card = document.createElement('div');
+        card.className = 'card';
+        const title = document.createElement('div');
+        title.className = 'cardTitle';
+        title.textContent = group.title;
+        const about = document.createElement('div');
+        about.className = 'cardHint';
+        about.textContent = group.about;
+        card.appendChild(title);
+        card.appendChild(about);
+        grid.insertBefore(card, firstFixedCard);
+      }
+    });
+    addParameterRow(card, name, SETTLEMENT_PARAMETER_DEFAULTS[name], name);
+  });
+})();
 // the bars of the public buildings are set in the list itself: they hold from then on
 PUBLIC_BUILDINGS.forEach(function (building) {
   const input = addParameterRow(document.getElementById('publicBuildingBars'), building.kind, building.householdsNeeded, '');
+  input.dataset.publicBuilding = building.kind;
   input.addEventListener('change', function () {
     building.householdsNeeded = Number(input.value);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The parameters saved and loaded as a file, and the history of their changes (the author,
+// 2026-10-13): every change made in the panel is kept, with its time, what it was and what it
+// became, in this browser (localStorage) and in every parameters file saved.
+// ---------------------------------------------------------------------------
+const PARAMETER_HISTORY_KEY = 'romeParameterHistory';
+const mostHistoryEntriesKept = 500;
+let parameterHistory = [];
+try {
+  parameterHistory = JSON.parse(localStorage.getItem(PARAMETER_HISTORY_KEY) || '[]');
+} catch (error) {
+  parameterHistory = [];
+}
+// every setting of the panel: the settlement's and the city's parameters, the bars of the
+// public buildings, the wall line
+function settingsOfThePanel() {
+  const settings = {};
+  document.querySelectorAll('input[data-parameter]').forEach(function (input) {
+    settings[input.dataset.parameter] = Number(input.value);
+  });
+  document.querySelectorAll('input[data-public-building]').forEach(function (input) {
+    settings['householdsNeededFor:' + input.dataset.publicBuilding] = Number(input.value);
+  });
+  settings.wallStyle = document.getElementById('wallStyleList').value;
+  return settings;
+}
+let settingsShown = null; // (the settings as they stood before the latest change)
+function rememberParameterChange(name, valueBefore, valueAfter, cause) {
+  parameterHistory.push({ time: new Date().toISOString(), name: name, from: valueBefore, to: valueAfter, cause: cause || 'set in the panel' });
+  if (parameterHistory.length > mostHistoryEntriesKept) {
+    parameterHistory.splice(0, parameterHistory.length - mostHistoryEntriesKept);
+  }
+  try {
+    localStorage.setItem(PARAMETER_HISTORY_KEY, JSON.stringify(parameterHistory));
+  } catch (error) {
+    // (no storage: the history lives for this page only)
+  }
+}
+// the settings compared with those last shown: a history entry for each that changed
+function noteTheChangesOfThePanel(cause) {
+  const settings = settingsOfThePanel();
+  if (settingsShown !== null) {
+    Object.keys(settings).forEach(function (name) {
+      if (settings[name] !== settingsShown[name]) {
+        rememberParameterChange(name, settingsShown[name], settings[name], cause);
+      }
+    });
+  }
+  settingsShown = settings;
+  showParameterHistory();
+}
+function wordsOfParameterChange(entry) {
+  const name = entry.name.indexOf('householdsNeededFor:') === 0 ? 'households needed for a ' + wordsOfName(entry.name.slice('householdsNeededFor:'.length)) : wordsOfName(entry.name);
+  return entry.time.slice(0, 16).replace('T', ' ') + ' · ' + name + ': ' + entry.from + ' → ' + entry.to + (entry.cause && entry.cause !== 'set in the panel' ? ' (' + entry.cause + ')' : '');
+}
+function showParameterHistory() {
+  const list = document.getElementById('parameterHistory');
+  list.innerHTML = '';
+  if (parameterHistory.length === 0) {
+    list.textContent = 'No change yet.';
+    return;
+  }
+  parameterHistory.slice().reverse().forEach(function (entry) {
+    const line = document.createElement('div');
+    line.textContent = wordsOfParameterChange(entry);
+    list.appendChild(line);
+  });
+}
+// the panel's settings set from a saved object (what it does not name stays), with a cause for the history
+function applySettingsToThePanel(settings, cause) {
+  document.querySelectorAll('input[data-parameter]').forEach(function (input) {
+    if (settings[input.dataset.parameter] !== undefined) {
+      input.value = settings[input.dataset.parameter];
+    }
+  });
+  document.querySelectorAll('input[data-public-building]').forEach(function (input) {
+    const value = settings['householdsNeededFor:' + input.dataset.publicBuilding];
+    if (value !== undefined) {
+      input.value = value;
+      PUBLIC_BUILDINGS.forEach(function (building) {
+        if (building.kind === input.dataset.publicBuilding) {
+          building.householdsNeeded = Number(value);
+        }
+      });
+    }
+  });
+  if (settings.wallStyle !== undefined && WALL_STYLES.indexOf(settings.wallStyle) >= 0) {
+    document.getElementById('wallStyleList').value = settings.wallStyle;
+    chosenWallStyle = settings.wallStyle;
+  }
+  noteTheChangesOfThePanel(cause);
+}
+document.getElementById('settingsPanel').addEventListener('change', function () {
+  noteTheChangesOfThePanel('set in the panel');
+});
+document.getElementById('saveParametersButton').addEventListener('click', function () {
+  const name = 'parameters_' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const file = { kind: 'romeParameters', savedAt: new Date().toISOString(), settings: settingsOfThePanel(), history: parameterHistory };
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' }));
+  link.download = name + '.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+  document.getElementById('parameterFileStatus').textContent = 'Saved as ' + name + '.json, in the downloads, with ' + parameterHistory.length + ' changes of history.';
+});
+document.getElementById('loadParametersButton').addEventListener('click', function () {
+  document.getElementById('loadParametersInput').click();
+});
+document.getElementById('loadParametersInput').addEventListener('change', function () {
+  const file = this.files[0];
+  if (!file) {
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function () {
+    try {
+      const loaded = JSON.parse(reader.result);
+      const settings = loaded.settings || loaded.parameters || loaded;
+      applySettingsToThePanel(settings, 'loaded from ' + file.name);
+      document.getElementById('parameterFileStatus').textContent = 'Loaded ' + file.name + (loaded.savedAt ? ', saved ' + loaded.savedAt.slice(0, 16).replace('T', ' ') : '') + '.';
+    } catch (error) {
+      document.getElementById('parameterFileStatus').textContent = 'Not a parameters file: ' + error.message;
+    }
+  };
+  reader.readAsText(file);
+  this.value = '';
+});
+document.getElementById('defaultParametersButton').addEventListener('click', function () {
+  const defaults = Object.assign({}, SETTLEMENT_PARAMETER_DEFAULTS);
+  PUBLIC_BUILDINGS.forEach(function (building) {
+    defaults['householdsNeededFor:' + building.kind] = DEFAULT_HOUSEHOLDS_NEEDED[building.kind];
+  });
+  defaults.wallStyle = DEFAULT_WALL_STYLE;
+  applySettingsToThePanel(defaults, 'back to the defaults');
+  document.getElementById('parameterFileStatus').textContent = 'Every parameter is at its default.';
+});
+document.getElementById('forgetParameterHistoryButton').addEventListener('click', function () {
+  parameterHistory = [];
+  try {
+    localStorage.removeItem(PARAMETER_HISTORY_KEY);
+  } catch (error) {
+    // (no storage)
+  }
+  showParameterHistory();
+});
+const DEFAULT_HOUSEHOLDS_NEEDED = {};
+PUBLIC_BUILDINGS.forEach(function (building) { DEFAULT_HOUSEHOLDS_NEEDED[building.kind] = building.householdsNeeded; });
+settingsShown = settingsOfThePanel();
+showParameterHistory();
 // the parameters as the panel has them, for a new settlement
 function readParameters() {
   const parameters = {};
@@ -888,6 +1354,9 @@ function showParameters(parameters) {
       input.value = parameters[input.dataset.parameter];
     }
   });
+  if (typeof noteTheChangesOfThePanel === 'function' && settingsShown !== null) {
+    noteTheChangesOfThePanel('of a loaded town');
+  }
 }
 
 // A saved run shown (tools/run_batch.js writes them): its ground, its town and its settlement as
@@ -897,13 +1366,13 @@ let currentMapKind = 'square';
 function showSavedRun(run) {
   if (run.groundSize) { // (the runs saved before the grounds had sizes were all of the first size)
     squarePointCount = run.groundSize.squarePointCount;
-    largeIrregularRingCount = run.groundSize.largeIrregularRingCount;
+    irregularRingCount = run.groundSize.largeIrregularRingCount;
   } else {
     squarePointCount = 30;
-    largeIrregularRingCount = 8;
+    irregularRingCount = 8;
   }
   document.getElementById('squareSizeList').value = String(squarePointCount);
-  document.getElementById('irregularSizeList').value = String(largeIrregularRingCount);
+  document.getElementById('irregularSizeList').value = String(irregularRingCount);
   startMap(run.ground);
   volume.clear();
   settlement = Settlement.restore(map, volume, run.saved);
@@ -918,16 +1387,198 @@ fetch('tools/runs/index.json').then(function (response) {
   return response.ok ? response.json() : [];
 }).then(function (runs) {
   const list = document.getElementById('savedRunList');
+  let groupElement = null;
+  let groupTitle = null;
   runs.forEach(function (run) {
+    if (run.group && run.group !== groupTitle) {
+      groupTitle = run.group;
+      groupElement = document.createElement('optgroup');
+      groupElement.label = groupTitle;
+      list.appendChild(groupElement);
+    }
     const entry = document.createElement('option');
     entry.value = run.file;
     entry.textContent = run.label;
-    list.appendChild(entry);
+    (groupElement || list).appendChild(entry);
   });
-  document.getElementById('savedRunHint').textContent = runs.length > 0 ? runs.length + ' runs saved. Choose one and load it.' : 'No runs saved yet (node tools/run_batch.js).';
+  document.getElementById('savedRunHint').textContent = runs.length > 0 ? runs.length + ' runs saved. Choose one and load it.' : 'No runs saved yet (node tools/test_runs.js).';
 }).catch(function () {
-  document.getElementById('savedRunHint').textContent = 'No runs saved yet (node tools/run_batch.js).';
+  document.getElementById('savedRunHint').textContent = 'No runs saved yet (node tools/test_runs.js).';
 });
+// Save: the town with its settlement and its parameters, as a file the browser hands over. Load:
+// such a file, or one a tool saved; Settle then lets it live on with its own parameters.
+document.getElementById('saveTownButton').addEventListener('click', function () {
+  const hint = document.getElementById('saveLoadHint');
+  if (settlement === null) {
+    hint.textContent = 'There is no settlement to save yet: Settle first.';
+    return;
+  }
+  const run = window.rome.saveRun();
+  run.name = 'town_' + settlement.seed + '_day_' + settlement.dayCount;
+  run.label = run.name + ' · ' + settlement.summary();
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(run)], { type: 'application/json' }));
+  link.download = run.name + '.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+  hint.textContent = 'Saved as ' + run.name + '.json (in the downloads).';
+});
+document.getElementById('loadTownButton').addEventListener('click', function () {
+  document.getElementById('loadTownInput').click();
+});
+document.getElementById('loadTownInput').addEventListener('change', function () {
+  const file = this.files[0];
+  if (!file) {
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function () {
+    try {
+      const run = JSON.parse(reader.result);
+      showSavedRun(run);
+      document.getElementById('saveLoadHint').textContent = 'Loaded ' + file.name + ' at day ' + settlement.dayCount + '. Settle lets it live on.';
+    } catch (error) {
+      document.getElementById('saveLoadHint').textContent = 'Not a saved town: ' + error.message;
+    }
+  };
+  reader.readAsText(file);
+  this.value = '';
+});
+// ---------------------------------------------------------------------------
+// The save slots on the server side (vite.config.js keeps them in saves/; the author,
+// 2026-10-13): each holds a town with its settlement, the parameters of the panel and a
+// thumbnail of the view. Save overwrites a slot; Load brings its town back and its parameters
+// into the panel; Empty frees it.
+// ---------------------------------------------------------------------------
+const thumbnailWidth = 320;
+const thumbnailHeight = 180;
+function thumbnailOfTheView() {
+  renderer.render(scene, cameraInUse());
+  const picture = document.createElement('canvas');
+  picture.width = thumbnailWidth;
+  picture.height = thumbnailHeight;
+  const brush = picture.getContext('2d');
+  // the middle of the view, cropped to the thumbnail's shape
+  const source = renderer.domElement;
+  const scale = Math.max(thumbnailWidth / source.width, thumbnailHeight / source.height);
+  const drawnWidth = source.width * scale;
+  const drawnHeight = source.height * scale;
+  brush.drawImage(source, (thumbnailWidth - drawnWidth) / 2, (thumbnailHeight - drawnHeight) / 2, drawnWidth, drawnHeight);
+  return picture.toDataURL('image/jpeg', 0.8);
+}
+function wordsOfSlot(meta) {
+  return meta.label + (meta.savedAt ? ' · ' + meta.savedAt.slice(0, 16).replace('T', ' ') : '');
+}
+function showSlotHint(text) {
+  document.getElementById('slotHint').textContent = text;
+}
+function showTheSlots() {
+  return fetch('saves/slots').then(function (response) {
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return response.json();
+  }).then(function (reply) {
+    const list = document.getElementById('saveSlots');
+    list.innerHTML = '';
+    reply.slots.forEach(function (slot) {
+      const row = document.createElement('div');
+      row.className = 'slotRow';
+      const picture = document.createElement('img');
+      picture.className = 'slotPicture';
+      picture.alt = '';
+      if (slot.hasThumbnail) {
+        picture.src = 'saves/slot_' + slot.slot + '.jpg?t=' + Date.now();
+      }
+      const words = document.createElement('div');
+      words.className = 'slotWords';
+      words.textContent = 'Slot ' + slot.slot + (slot.meta ? ': ' + slot.meta.label : ': empty');
+      if (slot.meta && slot.meta.savedAt) {
+        const when = document.createElement('small');
+        when.textContent = 'saved ' + slot.meta.savedAt.slice(0, 16).replace('T', ' ');
+        words.appendChild(when);
+      }
+      const buttons = document.createElement('div');
+      buttons.className = 'slotButtons';
+      const saveButton = document.createElement('button');
+      saveButton.textContent = 'Save';
+      saveButton.title = 'Save the town as it stands, with its parameters and a picture, in this slot' + (slot.meta ? ' (over what is there)' : '');
+      saveButton.addEventListener('click', function () { saveToSlot(slot.slot); });
+      const loadButton = document.createElement('button');
+      loadButton.textContent = 'Load';
+      loadButton.disabled = !slot.meta;
+      loadButton.title = 'Bring this town back, its parameters into the panel';
+      loadButton.addEventListener('click', function () { loadFromSlot(slot.slot); });
+      buttons.appendChild(saveButton);
+      buttons.appendChild(loadButton);
+      if (slot.meta) {
+        const emptyButton = document.createElement('button');
+        emptyButton.textContent = 'Empty';
+        emptyButton.title = 'Free this slot';
+        emptyButton.addEventListener('click', function () { emptyTheSlot(slot.slot); });
+        buttons.appendChild(emptyButton);
+      }
+      words.appendChild(buttons);
+      row.appendChild(picture);
+      row.appendChild(words);
+      list.appendChild(row);
+    });
+    showSlotHint(reply.slotCount + ' slots on the server, in saves/.');
+  }).catch(function (error) {
+    showSlotHint('The slots need the development server (npm run dev): ' + error.message);
+  });
+}
+function saveToSlot(slotNumber) {
+  if (settlement === null) {
+    showSlotHint('There is no settlement to save yet: Settle first.');
+    return;
+  }
+  const run = window.rome.saveRun();
+  const label = (run.ground === 'square' ? 'square ' + squarePointCount : 'irregular ' + irregularRingCount) +
+    ' · seed ' + settlement.seed + ' · day ' + settlement.dayCount + ' · ' + settlement.households.length + ' households';
+  run.name = 'slot_' + slotNumber;
+  run.label = label;
+  showSlotHint('Saving to slot ' + slotNumber + ' ...');
+  fetch('saves/slot/' + slotNumber, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run: run, settings: settingsOfThePanel(), thumbnail: thumbnailOfTheView(), label: label }),
+  }).then(function (response) {
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return showTheSlots();
+  }).then(function () {
+    showSlotHint('Saved in slot ' + slotNumber + ': ' + label + '.');
+  }).catch(function (error) {
+    showSlotHint('Not saved: ' + error.message);
+  });
+}
+function loadFromSlot(slotNumber) {
+  showSlotHint('Loading slot ' + slotNumber + ' ...');
+  fetch('saves/slot/' + slotNumber).then(function (response) {
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return response.json();
+  }).then(function (slot) {
+    showSavedRun(slot.run);
+    if (slot.settings) {
+      applySettingsToThePanel(slot.settings, 'loaded from slot ' + slotNumber);
+    }
+    showSlotHint('Loaded slot ' + slotNumber + ' at day ' + settlement.dayCount + '. Settle lets it live on.');
+  }).catch(function (error) {
+    showSlotHint('Not loaded: ' + error.message);
+  });
+}
+function emptyTheSlot(slotNumber) {
+  fetch('saves/slot/' + slotNumber, { method: 'DELETE' }).then(function () {
+    return showTheSlots();
+  }).then(function () {
+    showSlotHint('Slot ' + slotNumber + ' emptied.');
+  });
+}
+showTheSlots();
+
 document.getElementById('loadSavedRunButton').addEventListener('click', function () {
   const file = document.getElementById('savedRunList').value;
   if (!file) {
@@ -972,12 +1623,6 @@ document.getElementById('settleButton').addEventListener('click', function () {
   } else {
     startNewSettlement();
   }
-});
-document.getElementById('newSettlementButton').addEventListener('click', function () {
-  startNewSettlement(); // on the ground that is shown, whichever it is
-});
-document.getElementById('largeIrregularMapButton').addEventListener('click', function () {
-  startMap('largeIrregular');
 });
 
 // The town a map starts with
@@ -1247,6 +1892,9 @@ function mayStandAt(x, z) {
 }
 
 function startWalking() {
+  if (isPlanView) {
+    showPlanView(false);
+  }
   cameraBeforeWalking = { position: camera.position.clone(), target: controls.target.clone(), fieldOfView: camera.fov, near: camera.near };
   // one starts on the open ground nearest to what the view was turned on
   let start = null;
@@ -1350,14 +1998,19 @@ function animate(now) {
   }
   if (isWalking) {
     walkAStep(secondsPassed);
+  } else if (isPlanView) {
+    planControls.update();
   } else {
     controls.update();
   }
-  renderer.render(scene, camera);
+  renderer.render(scene, cameraInUse());
 }
 window.addEventListener('resize', function () {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  if (isPlanView) {
+    fitThePlanCamera();
+  }
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 startMap('square');
@@ -1416,6 +2069,35 @@ document.getElementById('catalogueWidthButton').addEventListener('click', functi
   const isNarrow = document.getElementById('catalogue').classList.toggle('narrow');
   event.currentTarget.textContent = isNarrow ? 'Wide' : 'Narrow';
 });
+// The panels at the right open from the round buttons and close with their cross; one panel at a
+// time, so that the town stays in view (after the Spring Show interface)
+function showPanel(panelName, isShown) {
+  const panels = { catalogue: 'partsButton', settingsPanel: 'parametersButton', menuPanel: 'menuButton', statisticsPanel: 'statisticsButton' };
+  Object.keys(panels).forEach(function (name) {
+    const isThisOne = name === panelName && isShown;
+    document.getElementById(name).classList.toggle('hidden', !isThisOne);
+    document.getElementById(panels[name]).classList.toggle('armed', isThisOne);
+  });
+}
+document.getElementById('partsButton').addEventListener('click', function () {
+  showPanel('catalogue', document.getElementById('catalogue').classList.contains('hidden'));
+});
+document.getElementById('parametersButton').addEventListener('click', function () {
+  showPanel('settingsPanel', document.getElementById('settingsPanel').classList.contains('hidden'));
+});
+document.getElementById('menuButton').addEventListener('click', function () {
+  showPanel('menuPanel', document.getElementById('menuPanel').classList.contains('hidden'));
+});
+document.getElementById('statisticsButton').addEventListener('click', function () {
+  showPanel('statisticsPanel', document.getElementById('statisticsPanel').classList.contains('hidden'));
+});
+document.getElementById('menuCloseButton').addEventListener('click', function () { showPanel('menuPanel', false); });
+document.getElementById('statisticsCloseButton').addEventListener('click', function () { showPanel('statisticsPanel', false); });
+document.getElementById('catalogueCloseButton').addEventListener('click', function () { showPanel('catalogue', false); });
+document.getElementById('settingsCloseButton').addEventListener('click', function () { showPanel('settingsPanel', false); });
+document.querySelectorAll('.openParametersButton').forEach(function (button) {
+  button.addEventListener('click', function () { showPanel('settingsPanel', true); });
+});
 animate();
 
 // For screenshots and tests: the page driven from outside
@@ -1433,7 +2115,7 @@ window.rome = {
   filmPrepare: function (ground, seed, pointsAlongASide, ringCount, parameters) {
     isFilming = true;
     squarePointCount = pointsAlongASide;
-    largeIrregularRingCount = ringCount;
+    irregularRingCount = ringCount;
     startMap(ground);
     volume.clear();
     settlement = new Settlement(map, volume, seed, parameters || {});
@@ -1451,7 +2133,7 @@ window.rome = {
   },
   // the interface hidden, the shadows reaching over the whole ground; returns the bounds
   filmScreen: function () {
-    ['toolbar', 'catalogue', 'liveStatistics', 'householdTip', 'walkHint'].forEach(function (elementName) {
+    ['toolbar', 'catalogue', 'statusStrip', 'liveStatistics', 'householdTip', 'walkHint', 'rightCol', 'settingsPanel', 'menuPanel', 'statisticsPanel'].forEach(function (elementName) {
       const element = document.getElementById(elementName);
       if (element) {
         element.style.display = 'none';
@@ -1575,7 +2257,12 @@ window.rome = {
     settlement = new Settlement(map, volume, seed);
     rebuildTown();
     document.getElementById('toolbar').style.display = 'none';
+    document.getElementById('statusStrip').style.display = 'none';
     document.getElementById('catalogue').style.display = 'none';
+    document.getElementById('rightCol').style.display = 'none';
+    document.getElementById('settingsPanel').style.display = 'none';
+    document.getElementById('menuPanel').style.display = 'none';
+    document.getElementById('statisticsPanel').style.display = 'none';
     hoverShape.visible = false;
     const caption = document.createElement('div');
     caption.id = 'filmCaption';
@@ -1623,6 +2310,8 @@ window.rome = {
     return settlement.summary();
   },
   rebuild: function () { rebuildSettledTown(); showDataLayer(); return true; },
+  // the measures of the town's form and wealth (Gini and the like), for the tools
+  studyNumbers: function () { return settlement.studyNumbers(); },
   // the settlement as it stands, as a run the app can load again (tools/test_runs.js saves it)
   saveRun: function () {
     const monumentNames = rebuildSettledTown();
@@ -1632,7 +2321,7 @@ window.rome = {
     });
     return {
       statistics: settlement.statistics(), monuments: countOfMonument, parameters: settlement.parameters, saved: settlement.save(),
-      groundSize: { squarePointCount: squarePointCount, largeIrregularRingCount: largeIrregularRingCount }, ground: currentMapKind, seed: settlement.seed,
+      groundSize: { squarePointCount: squarePointCount, largeIrregularRingCount: irregularRingCount }, ground: currentMapKind, seed: settlement.seed,
     };
   },
   // for pictures: the houses with a classical ground floor, each with the free point before it
@@ -1828,9 +2517,9 @@ window.rome = {
   // nothing drawn, its numbers taken every so many days. (The ground before the monuments is not
   // kept open, since that is found when the town is built.)
   studyEconomy: function (ground, seed, pointsAlongASide, ringCount, parameters, dayCount, daysBetweenSamples) {
-    if (currentMapKind !== ground || squarePointCount !== pointsAlongASide || largeIrregularRingCount !== ringCount) {
+    if (currentMapKind !== ground || squarePointCount !== pointsAlongASide || irregularRingCount !== ringCount) {
       squarePointCount = pointsAlongASide;
-      largeIrregularRingCount = ringCount;
+      irregularRingCount = ringCount;
       startMap(ground);
     }
     volume.clear();
@@ -1856,15 +2545,15 @@ window.rome = {
   chronicle: function () { return settlement.city.chronicle.map(function (entry) { return entry.day + ': ' + entry.text; }); },
   // the sizes of the grounds: points along a side of the square one, rings of the large irregular one
   // (the ground that is shown is made anew at its new size)
-  setGroundSize: function (pointsAlongASide, ringCount) { squarePointCount = pointsAlongASide; largeIrregularRingCount = ringCount; startMap(currentMapKind); return map.points.length; },
+  setGroundSize: function (pointsAlongASide, ringCount) { squarePointCount = pointsAlongASide; irregularRingCount = ringCount; startMap(currentMapKind); return map.points.length; },
   // One run of the settlement for a batch (tools/run_batch.js): on a ground, from a seed, with
   // parameters, lived for so many days with nothing drawn on the way; then the town is built
   // once and looked at from above its corner. Returns its numbers, its monuments and its state.
   runSimulation: function (ground, seed, dayCount, parameters, groundSize) {
-    const sizeChanged = groundSize && (groundSize.squarePointCount !== squarePointCount || groundSize.largeIrregularRingCount !== largeIrregularRingCount);
+    const sizeChanged = groundSize && (groundSize.squarePointCount !== squarePointCount || groundSize.largeIrregularRingCount !== irregularRingCount);
     if (sizeChanged) {
       squarePointCount = groundSize.squarePointCount;
-      largeIrregularRingCount = groundSize.largeIrregularRingCount;
+      irregularRingCount = groundSize.largeIrregularRingCount;
     }
     if (currentMapKind !== ground || sizeChanged) {
       startMap(ground);
@@ -1888,7 +2577,7 @@ window.rome = {
     });
     return {
       statistics: settlement.statistics(), monuments: countOfMonument, parameters: settlement.parameters, saved: settlement.save(),
-      groundSize: { squarePointCount: squarePointCount, largeIrregularRingCount: largeIrregularRingCount },
+      groundSize: { squarePointCount: squarePointCount, largeIrregularRingCount: irregularRingCount },
     };
   },
   showSavedRun: function (run) { showSavedRun(run); return settlement.summary(); },
@@ -1934,9 +2623,34 @@ window.rome = {
     camera.updateMatrixWorld();
     return true;
   },
+  // the masterplan on or off: the town straight from above, the whole ground in the window
+  planView: function (isOn, zoom) {
+    showPlanView(isOn !== false);
+    if (isPlanView && zoom) {
+      planCamera.zoom = zoom;
+      planCamera.updateProjectionMatrix();
+    }
+    return isPlanView;
+  },
+  // the settlement itself, for the tools that study a town (null before a town settles)
+  theSettlement: function () { return settlement; },
+  // how many vertices the data layer holds (for checking the tools)
+  dataLayerVertexCount: function () { return dataLayerMesh ? dataLayerMesh.geometry.attributes.position.count : 0; },
+  dataLayerVertex: function (index) {
+    const position = dataLayerMesh.geometry.attributes.position;
+    const colour = dataLayerMesh.geometry.attributes.color;
+    return { x: position.getX(index), y: position.getY(index), z: position.getZ(index), r: colour.getX(index), g: colour.getY(index), b: colour.getZ(index) };
+  },
+  // the buildings shown or hidden (a plan of the ground alone)
+  showTown: function (isShown) { if (townGroup) { townGroup.visible = isShown !== false; } return true; },
   hideInterface: function () {
     document.getElementById('toolbar').style.display = 'none';
+    document.getElementById('statusStrip').style.display = 'none';
     document.getElementById('catalogue').style.display = 'none';
+    document.getElementById('rightCol').style.display = 'none';
+    document.getElementById('settingsPanel').style.display = 'none';
+    document.getElementById('menuPanel').style.display = 'none';
+    document.getElementById('statisticsPanel').style.display = 'none';
     hoverShape.visible = false;
     return true;
   },

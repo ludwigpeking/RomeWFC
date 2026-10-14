@@ -18,7 +18,10 @@
 //   it covers only a corner of the ground stays open. So they find their places on the irregular
 //   ground as well as on the square one.
 // - Water. From a number of households on, the city wants a fountain. An aqueduct brings the
-//   water from outside the map, carried 8 m high, to the fountain it ends at; the fountain serves
+//   water from outside the map, carried 8 m high, to the fountain it ends at: a basin with a
+//   square before it on a patch of three by two points, the aqueduct ending at the middle of the
+//   back row (the author, 2026-10-13); people cross the square as they cross a street, and it
+//   draws them as a public building does. The fountain serves
 //   the households within a radius. When enough households live out of reach of every fountain,
 //   another one is built, with a branch of the aqueduct to it.
 // - The wall. When the tax has paid for it, the city walls in everything lasting (not the huts).
@@ -49,6 +52,9 @@ export const CITY_PARAMETER_DEFAULTS = {
   // every public work costs this many times what is written here and in PUBLIC_BUILDINGS: a large
   // chunk of what the city takes in, so that it saves a long while for each
   publicWorksCostScale: 3,                 // (6 until 2026-10-10: the works came too late)
+  // the city can have debt (the author, 2026-10-13): it builds its works, and buys the buildings
+  // the traffic presses on, while its money is above so many years of its takings below zero
+  yearsOfTakingsTheCityMayOwe: 5,
   moneyForAWallPoint: 50,
   moneyForADuctPoint: 60,
   moneyForANewAqueductSource: 2500,        // where an aqueduct is led in anew over the rim of the map (so that few are)
@@ -100,6 +106,13 @@ export function runTheCity(settlement) {
 
 function writeInTheChronicle(settlement, text) {
   settlement.city.chronicle.push({ day: settlement.dayCount, text: text });
+}
+
+// What the city may still spend: its money and the debt it may run up, so many years of its
+// takings (what it took in, a year, over its whole life so far)
+export function moneyTheCityMaySpend(settlement) {
+  const takingsEachYear = settlement.city.moneyCollected / Math.max(1, settlement.dayCount / 360); // (a year: 360 days, as in settlement.js)
+  return settlement.city.money + settlement.parameters.yearsOfTakingsTheCityMayOwe * takingsEachYear;
 }
 
 // cause: what the money went on (the city keeps the sum of each: spentOn)
@@ -176,7 +189,7 @@ function buildAPublicBuildingIfDue(settlement) {
     if ((builtCount > 0 && !candidate.anotherEvery) || settlement.households.length < (candidate.householdsNeeded + builtCount * (candidate.anotherEvery || 0)) * scale) {
       continue;
     }
-    if (settlement.city.money < candidate.money * settlement.parameters.publicWorksCostScale) {
+    if (moneyTheCityMaySpend(settlement) < candidate.money * settlement.parameters.publicWorksCostScale) {
       break; // the city saves for it
     }
     if (settlement.dayCount < (settlement.city.dayOfNextSearch[candidate.kind] || 0)) {
@@ -186,7 +199,7 @@ function buildAPublicBuildingIfDue(settlement) {
     if (siteOfIt === null) {
       settlement.city.dayOfNextSearch[candidate.kind] = settlement.dayCount + daysBeforeAFailedSearchIsRepeated;
     }
-    if (siteOfIt !== null && settlement.city.money >= candidate.money * settlement.parameters.publicWorksCostScale + siteOfIt.moneyForClearing) {
+    if (siteOfIt !== null && moneyTheCityMaySpend(settlement) >= candidate.money * settlement.parameters.publicWorksCostScale + siteOfIt.moneyForClearing) {
       wanted = candidate;
       site = siteOfIt;
       break;
@@ -227,7 +240,7 @@ function buildAPublicBuildingIfDue(settlement) {
     grid: site.grid || null, free: site.free || null, openPoints: site.openPoints || [], day: settlement.dayCount,
   });
   spend(settlement, wanted.money * settlement.parameters.publicWorksCostScale, 'publicBuildings');
-  settlement.raiseSecurityForAPublicBuilding(site.points[Math.floor(site.points.length / 2)].pointIndex);
+  settlement.raiseSecurityForAnInstitution(site.points.map(function (place) { return place.pointIndex; }), 'publicBuilding');
   const firstPointOfIt = site.points[0].pointIndex;
   writeInTheChronicle(settlement, wanted.kind + ' built at ' + settlement.households.length + ' households, ' +
     (settlement.hasAWall ? (settlement.isWithinWalls[firstPointOfIt] ? 'within the walls' : 'outside the walls') : 'before there was a wall') +
@@ -246,6 +259,10 @@ function buildAPublicBuildingIfDue(settlement) {
     const frontPoints = builtNow.pointIndices.filter(function (pointIndex) { return forwardOf[pointIndex] > farthestForward - cellSize * 0.75; });
     builtNow.openPoints = squareBeforeTheFront(settlement, frontPoints, builtNow.pointIndices);
   }
+  // the ring round the building is kept open with the square before it
+  const isOpen = new Set(builtNow.openPoints || []);
+  ringRound(settlement, builtNow.pointIndices).forEach(function (pointIndex) { isOpen.add(pointIndex); });
+  builtNow.openPoints = Array.from(isOpen);
   // the square is cleared (what stands there is bought) and stays open from now on: nobody
   // settles or builds there (isKeptOpen holds through the simulation, not only when the town is drawn)
   (builtNow.openPoints || []).forEach(function (pointIndex) {
@@ -321,7 +338,7 @@ function findTheCheapestSite(settlement, wanted) {
   // busiest front; of the places within trafficShareThatCounts of the busiest, the cheapest is taken.
   const candidates = [];
   const trafficShareThatCounts = wanted.standsOverABusyStreet ? 0.9 : 0.7;
-  const moneyForClearingAtMost = settlement.city.money - wanted.money * settlement.parameters.publicWorksCostScale;
+  const moneyForClearingAtMost = moneyTheCityMaySpend(settlement) - wanted.money * settlement.parameters.publicWorksCostScale;
   for (let firstPoint = 0; firstPoint < map.points.length; firstPoint++) {
     for (const secondPoint of map.sideNeighboursOfPoint[firstPoint]) {
       const grid = latticePatch(map, firstPoint, secondPoint, wanted.widthPoints + 2, wanted.depthPoints + 2);
@@ -420,6 +437,24 @@ function findTheCheapestSite(settlement, wanted) {
     }
   }
   return best;
+}
+
+// The ring round an institution: every point that shares a quad with a point of it, but not its
+// own points, the rim of the map, the works of the city or another public building. Kept open
+// (the author, 2026-10-13: houses were built hard against the public buildings and the fountains).
+function ringRound(settlement, ownPoints) {
+  const map = settlement.map;
+  const volume = settlement.volume;
+  const isOwn = new Set(ownPoints);
+  const ring = new Set();
+  ownPoints.forEach(function (ownPoint) {
+    map.quadNeighboursOfPoint[ownPoint].forEach(function (pointIndex) {
+      if (!isOwn.has(pointIndex) && !map.points[pointIndex].isOnBoundary && volume.works[pointIndex] === 0 && volume.publicBuildingOfPoint[pointIndex] === 0) {
+        ring.add(pointIndex);
+      }
+    });
+  });
+  return Array.from(ring);
 }
 
 // The square before a public building: every point within two edges of the points of its front
@@ -580,46 +615,98 @@ function buildAFountainIfNeeded(settlement) {
   const isNeeded = city.fountainPoints.length === 0
     ? settlement.households.length >= parameters.householdsForTheFirstFountain
     : unserved.length >= parameters.householdsUnservedForAnotherFountain;
-  if (!isNeeded || city.money < parameters.moneyForAFountain * parameters.publicWorksCostScale) {
+  if (!isNeeded || moneyTheCityMaySpend(settlement) < parameters.moneyForAFountain * parameters.publicWorksCostScale) {
     return false;
   }
-  // the site: free ground, not a busy street, beside the town, within reach of the most
-  // households that have no water yet
-  let site = -1;
-  let mostHouseholdsReached = 0;
-  for (let pointIndex = 0; pointIndex < map.points.length; pointIndex++) {
-    if (settlement.ownerOfPoint[pointIndex] !== null || volume.works[pointIndex] !== 0 || settlement.isKeptOpen[pointIndex] ||
-      map.points[pointIndex].isOnBoundary || volume.streetGrades[pointIndex] === 2) {
-      continue;
-    }
-    const point = map.points[pointIndex];
+  if (settlement.dayCount < (city.dayOfNextSearch.fountain || 0)) {
+    return false; // a site was looked for lately, in vain
+  }
+  // (a fountain is worth building where it reaches a quarter of the bar at least: with its debt
+  // allowed the city built one every ten days for a handful of households, 38 by day 1,280)
+  const fewestHouseholdsForAFountain = Math.max(1, Math.round(parameters.householdsUnservedForAnotherFountain / 4));
+  // The site: a patch of three by two points of free ground (streets may be taken, not busy
+  // ones), beside the town, within reach of the most households that have no water yet; the
+  // aqueduct ends at the middle of its back row. Where no patch is found (the irregular ground
+  // has few regular patches), a single free point, as before 2026-10-13.
+  function isFree(pointIndex) {
+    return settlement.ownerOfPoint[pointIndex] === null && volume.works[pointIndex] === 0 && !settlement.isKeptOpen[pointIndex] &&
+      !map.points[pointIndex].isOnBoundary && volume.streetGrades[pointIndex] !== 2 && volume.publicBuildingOfPoint[pointIndex] === 0;
+  }
+  function householdsReachedFrom(x, z) {
     let householdsReached = 0;
     unserved.forEach(function (household) {
       const home = map.points[household.pointIndices[0]];
-      if (Math.hypot(home.x - point.x, home.z - point.z) <= parameters.fountainRadius * 0.85) {
+      if (Math.hypot(home.x - x, home.z - z) <= parameters.fountainRadius * 0.85) {
         householdsReached++;
       }
     });
-    if (householdsReached > mostHouseholdsReached) {
-      mostHouseholdsReached = householdsReached;
-      site = pointIndex;
+    return householdsReached;
+  }
+  let site = -1;
+  let footprint = null; // { endPoint, pointIndices, backRow, frontRow }
+  let mostHouseholdsReached = 0;
+  for (let firstPoint = 0; firstPoint < map.points.length; firstPoint++) {
+    for (const secondPoint of map.sideNeighboursOfPoint[firstPoint]) {
+      const patch = latticePatch(map, firstPoint, secondPoint, 3, 2);
+      if (patch === null || !patch[0].every(isFree) || !patch[1].every(isFree)) {
+        continue;
+      }
+      const middleX = (map.points[patch[0][1]].x + map.points[patch[1][1]].x) / 2;
+      const middleZ = (map.points[patch[0][1]].z + map.points[patch[1][1]].z) / 2;
+      const householdsReached = householdsReachedFrom(middleX, middleZ);
+      if (householdsReached > mostHouseholdsReached) {
+        mostHouseholdsReached = householdsReached;
+        site = patch[0][1];
+        footprint = { endPoint: site, pointIndices: patch[0].concat(patch[1]), backRow: patch[0].slice(), frontRow: patch[1].slice() };
+      }
     }
   }
   if (site === -1) {
+    for (let pointIndex = 0; pointIndex < map.points.length; pointIndex++) {
+      if (!isFree(pointIndex)) {
+        continue;
+      }
+      const householdsReached = householdsReachedFrom(map.points[pointIndex].x, map.points[pointIndex].z);
+      if (householdsReached > mostHouseholdsReached) {
+        mostHouseholdsReached = householdsReached;
+        site = pointIndex;
+      }
+    }
+  }
+  if (site === -1 || mostHouseholdsReached < fewestHouseholdsForAFountain) {
+    city.dayOfNextSearch.fountain = settlement.dayCount + daysBeforeAFailedSearchIsRepeated;
     return false;
   }
+  // (the square is marked first, so that the aqueduct keeps off it and reaches the basin from the back)
+  const squarePoints = footprint ? footprint.pointIndices : [site];
+  squarePoints.forEach(function (pointIndex) { volume.works[pointIndex] |= WORK.fountain; });
   const route = findTheRouteOfTheAqueduct(settlement, site);
-  if (route === null || city.money < (parameters.moneyForAFountain + route.money) * parameters.publicWorksCostScale) {
+  if (route === null || moneyTheCityMaySpend(settlement) < (parameters.moneyForAFountain + route.money) * parameters.publicWorksCostScale) {
+    squarePoints.forEach(function (pointIndex) { volume.works[pointIndex] &= ~WORK.fountain; });
     return false;
   }
   route.points.forEach(function (pointIndex) {
     clearForTheCity(settlement, pointIndex, 'aqueduct');
     volume.works[pointIndex] |= WORK.duct;
   });
-  volume.works[site] |= WORK.duct | WORK.fountain;
+  volume.works[site] |= WORK.duct;
   city.fountainPoints.push(site);
+  if (footprint) {
+    volume.fountains.push(footprint);
+  }
+  settlement.venuesKnown = null; // (a venue more)
+  settlement.raiseSecurityForAnInstitution(squarePoints, 'fountain');
+  // the ring round the square is cleared and kept open: nobody builds against the fountain
+  ringRound(settlement, squarePoints).forEach(function (pointIndex) {
+    const householdThere = settlement.ownerOfPoint[pointIndex];
+    if (householdThere !== null && !householdThere.isCity) {
+      clearForTheCity(settlement, pointIndex, 'squares');
+    }
+    settlement.isKeptOpen[pointIndex] = 1;
+  });
   spend(settlement, (parameters.moneyForAFountain + route.newPointCount * parameters.moneyForADuctPoint) * parameters.publicWorksCostScale, 'aqueduct');
-  writeInTheChronicle(settlement, 'fountain ' + city.fountainPoints.length + ' built for ' + mostHouseholdsReached + ' households without water; ' + route.newPointCount + ' points of aqueduct');
+  writeInTheChronicle(settlement, 'fountain ' + city.fountainPoints.length + (footprint ? ' with its square' : '') + ' built for ' + mostHouseholdsReached +
+    ' households without water; ' + route.newPointCount + ' points of aqueduct');
   return true;
 }
 
@@ -765,7 +852,7 @@ function buildTheWallIfDue(settlement) {
     settlement.city.dayOfNextSearch.wall = settlement.dayCount + daysBeforeAFailedSearchIsRepeated;
     return false;
   }
-  if (settlement.city.money < newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale) {
+  if (moneyTheCityMaySpend(settlement) < newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale) {
     return false;
   }
   // the new wall goes up (the walls that stand stay as they are); huts in its way are cleared
@@ -779,8 +866,19 @@ function buildTheWallIfDue(settlement) {
   chooseTheGates(settlement, newWallPoints).forEach(function (pointIndex) {
     volume.works[pointIndex] = (volume.works[pointIndex] & ~WORK.wall) | WORK.gate;
   });
+  // the old wall comes down where the new one does not stand on it (the author, 2026-10-13):
+  // its ground is free again, for the city to sell
+  const standsInThePlan = new Set(plan.wallPoints);
+  let pointsTornDown = 0;
+  for (let pointIndex = 0; pointIndex < volume.pointCount; pointIndex++) {
+    if ((volume.works[pointIndex] & (WORK.wall | WORK.gate)) !== 0 && !standsInThePlan.has(pointIndex)) {
+      volume.works[pointIndex] &= ~(WORK.wall | WORK.gate);
+      pointsTornDown++;
+    }
+  }
   settlement.wallCount++;
-  writeInTheChronicle(settlement, 'wall ' + settlement.wallCount + ' built at ' + lastingHouseholdCount + ' lasting households: ' + newWallPoints.length + ' points');
+  writeInTheChronicle(settlement, 'wall ' + settlement.wallCount + ' built at ' + lastingHouseholdCount + ' lasting households: ' + newWallPoints.length + ' points' +
+    (pointsTornDown > 0 ? '; the old wall torn down, ' + pointsTornDown + ' points of ground free again' : ''));
   settlement.isWithinWalls.set(plan.isInside);
   settlement.hasAWall = true;
   spend(settlement, newPointCount * parameters.moneyForAWallPoint * parameters.publicWorksCostScale, 'wall');

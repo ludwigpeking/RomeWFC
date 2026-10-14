@@ -94,18 +94,8 @@ async function main() {
     browser.kill();
   }
   // the list for the app: every run on the disk, the test towns first
-  const savedRuns = fs.readdirSync(RUN_FOLDER).filter(function (fileName) {
-    return /^[a-z]+_\d+\.json$/.test(fileName);
-  }).sort(function (first, second) {
-    const firstIsTest = first.startsWith("test_") ? 0 : 1;
-    const secondIsTest = second.startsWith("test_") ? 0 : 1;
-    return firstIsTest - secondIsTest || first.localeCompare(second);
-  }).map(function (fileName) {
-    const run = JSON.parse(fs.readFileSync(path.join(RUN_FOLDER, fileName), "utf8"));
-    return { file: fileName, label: run.label };
-  });
-  fs.writeFileSync(path.join(RUN_FOLDER, "index.json"), JSON.stringify(savedRuns, null, 1));
-  console.log(savedRuns.length + " runs listed in index.json");
+  const runIndex = require("./run_index");
+  console.log(runIndex.writeRunIndex(require("./experiments").EXPERIMENTS) + " runs listed in index.json");
 }
 
 main().catch(function (error) {

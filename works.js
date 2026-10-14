@@ -16,7 +16,10 @@
 //   piers stand between the points and its arches over them, so that a street passes under an
 //   arch. Where it turns, branches or ends it stands on a pier at the point itself, and the water
 //   runs on over the pier: the channels open into a round of water there.
-// - The fountain: a basin of marble at the end of an aqueduct, the water falling from the last pier.
+// - The fountain: a long basin of marble along the back row of its square of three by two points,
+//   round the last pier of the aqueduct, the water falling from the pier into it on three sides;
+//   a marble post at each end of the basin, a step before it, the square paved. (A fountain of
+//   one point, from before 2026-10-13: a round basin round the pier.)
 
 import { cellSize } from './parts';
 import { WORK } from './volume';
@@ -185,8 +188,8 @@ function nearestPlaceNumber(line, place) {
   return nearest;
 }
 const aqueductHeight = 8;
-const aqueductThickness = 2;
-const channelWallThickness = 0.4;
+const aqueductThickness = 1.2;             // (2 until 2026-10-12: the author wants it slighter, to suit the little city)
+const channelWallThickness = 0.3;
 
 export function buildWorks(collector, volume) {
   const map = volume.map;
@@ -213,6 +216,60 @@ export function buildWorks(collector, volume) {
   function directionBetween(from, to) {
     const length = Math.hypot(to.x - from.x, to.z - from.z) || 1;
     return { x: (to.x - from.x) / length, z: (to.z - from.z) / length, length: length };
+  }
+  // the fountains with their squares, by the point the aqueduct ends at; and every point of a square
+  const fountainAtEnd = new Map();
+  const isOnASquare = new Set();
+  (volume.fountains || []).forEach(function (fountain) {
+    fountainAtEnd.set(fountain.endPoint, fountain);
+    fountain.pointIndices.forEach(function (pointIndex) { isOnASquare.add(pointIndex); });
+  });
+  // ---- a fountain with its square: the basin along the back row, round the pier at its middle
+  function buildFountainWithSquare(fountain) {
+    const end = map.points[fountain.endPoint];
+    const backFirst = map.points[fountain.backRow[0]];
+    const backLast = map.points[fountain.backRow[fountain.backRow.length - 1]];
+    const frontMiddle = map.points[fountain.frontRow[1]];
+    const along = directionBetween(backFirst, backLast); // along the long edge
+    const front = directionBetween(end, frontMiddle);    // from the back row to the front row
+    // the square paved: the whole patch, half a cell beyond its points
+    turnedBox('stoneShade', (end.x + frontMiddle.x) / 2, (end.z + frontMiddle.z) / 2, along.x, along.z,
+      along.length + cellSize, front.length + cellSize, 0, 0.12);
+    // the basin: its back edge just behind the pier, the water reaching well before it
+    const basinLength = along.length + 1.6;
+    const basinWidth = 3.2;
+    const basinForward = basinWidth / 2 - aqueductThickness / 2 - 0.6; // the pier stands 0.6 m before the back wall of the basin
+    const basinX = end.x + front.x * basinForward;
+    const basinZ = end.z + front.z * basinForward;
+    // the body of the basin, a rim of four bars round its top, the water within the rim (a
+    // little below it: the rim and the water fought where their tops met, 2026-10-13)
+    turnedBox('stone', basinX, basinZ, along.x, along.z, basinLength, basinWidth, 0.12, 0.7);
+    const rimLength = basinLength + 0.24;
+    const rimWidth = basinWidth + 0.24;
+    const rimBar = 0.32;
+    [-1, 1].forEach(function (side) {
+      turnedBox('stoneShade', basinX + front.x * side * (rimWidth / 2 - rimBar / 2), basinZ + front.z * side * (rimWidth / 2 - rimBar / 2),
+        along.x, along.z, rimLength, rimBar, 0.82, 0.24);
+      turnedBox('stoneShade', basinX + along.x * side * (rimLength / 2 - rimBar / 2), basinZ + along.z * side * (rimLength / 2 - rimBar / 2),
+        along.x, along.z, rimBar, rimWidth - 2 * rimBar, 0.82, 0.24);
+    });
+    turnedBox('water', basinX, basinZ, along.x, along.z, rimLength - 2 * rimBar, rimWidth - 2 * rimBar, 0.8, 0.18);
+    // a step before the basin, the length of it
+    turnedBox('stone', basinX + front.x * (basinWidth / 2 + 0.45), basinZ + front.z * (basinWidth / 2 + 0.45), along.x, along.z, basinLength + 0.9, 0.9, 0.12, 0.2);
+    // the water falling from the channel into the basin: to the front of the pier and to each side, out of spouts of marble
+    [{ x: front.x, z: front.z }, { x: along.x, z: along.z }, { x: -along.x, z: -along.z }].forEach(function (side) {
+      const reach = aqueductThickness / 2 + 0.38;
+      turnedBox('water', end.x + side.x * reach, end.z + side.z * reach, 1, 0, 0.2, 0.2, 1.0, aqueductHeight - 2.5);
+      turnedBox('stone', end.x + side.x * (reach - 0.05), end.z + side.z * (reach - 0.05), 1, 0, 0.5, 0.5, aqueductHeight - 1.6, 0.3);
+    });
+    // a post of marble at each end of the basin, a ball on it
+    [-1, 1].forEach(function (endSign) {
+      const postX = basinX + along.x * endSign * (basinLength / 2 + 0.5);
+      const postZ = basinZ + along.z * endSign * (basinLength / 2 + 0.5);
+      collector.cylinder('stone', 0.26, 0.32, 1.5, postX, 0.12, postZ, 12);
+      collector.cylinder('stoneShade', 0.36, 0.36, 0.12, postX, 1.62, postZ, 12);
+      collector.cylinder('stone', 0.05, 0.3, 0.5, postX, 1.74, postZ, 12);
+    });
   }
   // whether a point lies on a straight run: two neighbours, nearly opposite each other
   function runsStraightThrough(point, neighbourPoints) {
@@ -627,8 +684,11 @@ export function buildWorks(collector, volume) {
       }
     }
 
-    // ---- the fountain: a basin of marble round the last pier of the aqueduct
-    if (works & WORK.fountain) {
+    // ---- the fountain: with its square (built from its end point), or of one point: a round
+    // basin of marble round the last pier of the aqueduct
+    if ((works & WORK.fountain) && fountainAtEnd.has(pointIndex)) {
+      buildFountainWithSquare(fountainAtEnd.get(pointIndex));
+    } else if ((works & WORK.fountain) && !isOnASquare.has(pointIndex)) {
       collector.cylinder('stone', 2.0, 2.0, 0.75, point.x, 0, point.z, 24);
       collector.cylinder('stoneShade', 2.1, 2.1, 0.14, point.x, 0.75, point.z, 24);
       collector.cylinder('water', 1.8, 1.8, 0.08, point.x, 0.8, point.z, 24);

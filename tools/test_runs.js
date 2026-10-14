@@ -9,7 +9,9 @@
 //   tools/tests/index.html               the snapshots of all runs side by side, day by day
 //   tools/runs/<run>.json                the town at its last day (and index.json, the list for the app)
 // Settings by the environment: ROME_PAGE_ADDRESS (default: dist next to tools),
-// ROME_DEBUGGING_PORT, ROME_TEST_DAYS (default 3000), ROME_FRAME_COUNT (snapshots, default 20).
+// ROME_DEBUGGING_PORT, ROME_TEST_DAYS (default 3000), ROME_FRAME_COUNT (snapshots, default 20),
+// ROME_PICTURE_WIDTH and ROME_PICTURE_HEIGHT (default 1280 by 720).
+// The parameter experiments (tools/experiments.js) are among the runs: exp_baseline, exp_<name>_low, exp_<name>_high.
 "use strict";
 
 const fs = require("fs");
@@ -25,34 +27,35 @@ const RUN_FOLDER = path.join(__dirname, "runs");
 const DAY_COUNT = Number(process.env.ROME_TEST_DAYS || 3000);
 const FRAME_COUNT = Number(process.env.ROME_FRAME_COUNT || 20);
 const DAYS_BETWEEN_SNAPSHOTS = Math.max(1, Math.round(DAY_COUNT / FRAME_COUNT));
-const PICTURE_WIDTH = 1280;
-const PICTURE_HEIGHT = 720;
-const LAYERS = ["none", "location", "height"];
+const PICTURE_WIDTH = Number(process.env.ROME_PICTURE_WIDTH || 1280);
+const PICTURE_HEIGHT = Number(process.env.ROME_PICTURE_HEIGHT || 720);
+// the data layers pictured at every snapshot (ROME_LAYERS, e.g. "none" alone for a quick run)
+const LAYERS = (process.env.ROME_LAYERS || "none location height money").split(/[\s,]+/).filter(Boolean);
+// a call to the page that takes longer than this has lost its renderer (the Mac's headless
+// Chrome died twice at day 2700 of a dense town and node waited for ever): the run fails instead
+const MINUTES_A_CALL_MAY_TAKE = Number(process.env.ROME_CALL_MINUTES || 10);
 const CAMERA = { angle: 0.6, distance: 2.3, elevation: 0.62, fieldOfView: 30 };
 
-// The runs: the parameters the app starts with, on both grounds, several seeds
+// The runs: the parameters the app starts with, on both grounds, several seeds; the first town
+// again with the random fortune of the households off, at 30% (the default) and at 50%
 const RUNS = {
-  sim_square_4001: { ground: "square", seed: 4001, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_square_4001: { ground: "square", seed: 4001, pointsAlongASide: 60, ringCount: 14, parameters: { chanceOfAFortuneEachDay: 0 } },
+  sim_square_4001_fortune30: { ground: "square", seed: 4001, pointsAlongASide: 60, ringCount: 14, parameters: {} },
+  sim_square_4001_fortune50: { ground: "square", seed: 4001, pointsAlongASide: 60, ringCount: 14, parameters: { fortuneShareOfWealthAtMost: 0.5 } },
   sim_square_4002: { ground: "square", seed: 4002, pointsAlongASide: 60, ringCount: 14, parameters: {} },
   sim_irregular_4003: { ground: "largeIrregular", seed: 4003, pointsAlongASide: 60, ringCount: 14, parameters: {} },
   sim_irregular_4004: { ground: "largeIrregular", seed: 4004, pointsAlongASide: 60, ringCount: 14, parameters: {} },
   sim_square_4005: { ground: "square", seed: 4005, pointsAlongASide: 80, ringCount: 18, parameters: {} },
+  // the baseline of the rules of a day (the same ground as the experiments), to set a changed rule
+  // against the day before: 2026-10-12, the portal bonus on the whole property, streets at twice
+  // the vacant land (was four times), no way-out rule
+  base_1012: { ground: "square", seed: 4005, pointsAlongASide: 80, ringCount: 18, parameters: {} },
 };
+Object.assign(RUNS, require("./experiments").experimentRuns(), require("./experiments").claimRuns());
 
-// The list of the runs for the app: every run on the disk, the simulations first
+// The list of the runs for the app (tools/run_index.js)
 function writeRunIndex() {
-  const savedRuns = fs.readdirSync(RUN_FOLDER).filter(function (fileName) {
-    return /^[a-z]+_[a-z0-9_]+\.json$/.test(fileName) && fileName !== "index.json";
-  }).sort(function (first, second) {
-    const firstRank = first.startsWith("sim_") ? 0 : first.startsWith("test_") ? 1 : 2;
-    const secondRank = second.startsWith("sim_") ? 0 : second.startsWith("test_") ? 1 : 2;
-    return firstRank - secondRank || first.localeCompare(second);
-  }).map(function (fileName) {
-    const run = JSON.parse(fs.readFileSync(path.join(RUN_FOLDER, fileName), "utf8"));
-    return { file: fileName, label: run.label };
-  });
-  fs.writeFileSync(path.join(RUN_FOLDER, "index.json"), JSON.stringify(savedRuns, null, 1));
-  return savedRuns.length;
+  return require("./run_index").writeRunIndex(require("./experiments").EXPERIMENTS);
 }
 
 function wait(milliseconds) {
@@ -104,7 +107,7 @@ const RUNS = ${JSON.stringify(runs)};
 const LAYERS = ${JSON.stringify(LAYERS)};
 const NUMBERS_SHOWN = [["households", "households"], ["hutBlocks", "huts"], ["houseBlocks", "houses"], ["houseBlocksWithClassicalFloors", "houses with classical floors"],
   ["classicalBlocks", "classical blocks"], ["towerBlocks", "towers"], ["gardenPoints", "gardens"], ["roofTerraces", "roof terraces"], ["meanLevelsOfABlock", "mean levels"],
-  ["mostLevelsOfABlock", "most levels"], ["acquisitions", "properties bought"], ["buildingsBrokenThrough", "buildings broken through"], ["meanMoneyOfAHousehold", "mean money of a household"], ["treasury", "treasury of the city"]];
+  ["mostLevelsOfABlock", "most levels"], ["acquisitions", "properties bought"], ["buildingsBrokenThrough", "buildings broken through"], ["meanMoneyOfAHousehold", "mean money of a household"], ["householdsInDebt", "households in debt"], ["landUsePrivate", "land use: private"], ["landUseStreet", "land use: street"], ["landUseOpen", "land use: open space"], ["landUsePublic", "land use: public buildings"], ["roadPoints", "street points"], ["busyStreetPoints", "busy street points"], ["streetsTaken", "streets bought and built on"], ["fortunesWon", "fortunes won"], ["fortunesLost", "fortunes lost"], ["treasury", "treasury of the city"]];
 let layerName = "none";
 let snapshotIndex = 0;
 let playTimer = null;
@@ -134,6 +137,7 @@ function show() {
     dayShown = Math.max(dayShown, snapshot.day);
     const card = cardOfRun[runNumber];
     card.picture.src = run.name + "/" + layerName + "/day_" + String(snapshot.day).padStart(5, "0") + ".jpg";
+    card.picture.onerror = function () { card.picture.removeAttribute("src"); card.picture.alt = "no " + layerName + " picture of this run"; };
     card.heading.textContent = run.name + " \u00b7 day " + snapshot.day;
     card.table.innerHTML = NUMBERS_SHOWN.map(function (entry) {
       const value = entry[0] === "treasury" ? snapshot.treasury : snapshot.statistics[entry[0]];
@@ -197,7 +201,10 @@ async function main() {
     return new Promise(function (resolve, reject) { pendingReplies.set(messageId, { resolve: resolve, reject: reject }); });
   }
   async function evaluate(expression) {
-    const reply = await send("Runtime.evaluate", { expression: expression, returnByValue: true, awaitPromise: true });
+    const reply = await Promise.race([
+      send("Runtime.evaluate", { expression: expression, returnByValue: true, awaitPromise: true }),
+      wait(MINUTES_A_CALL_MAY_TAKE * 60000).then(function () { throw new Error("no answer from the page in " + MINUTES_A_CALL_MAY_TAKE + " minutes: " + expression.slice(0, 80)); }),
+    ]);
     if (reply.exceptionDetails) {
       throw new Error(expression.slice(0, 80) + ": " + (reply.exceptionDetails.exception ? reply.exceptionDetails.exception.description : reply.exceptionDetails.text));
     }
@@ -233,16 +240,21 @@ async function main() {
     await send("Page.enable");
     await send("Runtime.enable");
     await send("Emulation.setDeviceMetricsOverride", { width: PICTURE_WIDTH, height: PICTURE_HEIGHT, deviceScaleFactor: 1, mobile: false });
-    await send("Page.navigate", { url: PAGE_ADDRESS });
-    for (let attempt = 0; attempt < 160; attempt++) {
-      await wait(250);
-      const isReady = await evaluate("Boolean(window.rome)").catch(function () { return false; });
-      if (isReady) { break; }
+    // the page is loaded afresh for every run: a town's geometry lingers in the page after it,
+    // and over several runs the browser grew to many gigabytes
+    async function loadThePage() {
+      await send("Page.navigate", { url: PAGE_ADDRESS });
+      for (let attempt = 0; attempt < 160; attempt++) {
+        await wait(250);
+        const isReady = await evaluate("Boolean(window.rome)").catch(function () { return false; });
+        if (isReady) { break; }
+      }
+      await wait(1500);
     }
-    await wait(1500);
 
     for (const runName of runNames) {
       const run = RUNS[runName];
+      await loadThePage();
       const runFolder = path.join(TEST_FOLDER, runName);
       fs.rmSync(runFolder, { recursive: true, force: true });
       fs.mkdirSync(runFolder, { recursive: true });
@@ -295,7 +307,11 @@ async function main() {
   }
 }
 
-main().catch(function (error) {
-  console.error(error);
-  process.exit(1);
-});
+module.exports = { RUNS: RUNS };
+
+if (require.main === module) {
+  main().catch(function (error) {
+    console.error(error);
+    process.exit(1);
+  });
+}

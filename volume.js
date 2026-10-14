@@ -47,6 +47,11 @@ export class PointVolume {
     this.works = new Uint8Array(this.pointCount);
     this.publicBuildings = [];
     this.publicBuildingOfPoint = new Int32Array(this.pointCount);
+    // The fountains with their squares (city.js): [{ endPoint, pointIndices, backRow, frontRow }],
+    // the aqueduct ending at endPoint, the middle of the back row of a patch of three by two
+    // points; every point of it carries WORK.fountain. (A fountain of one point, from before
+    // 2026-10-13, is not in the list: its point carries the flag alone.)
+    this.fountains = [];
   }
 
   hasShopFront(raisedPoint, facedPoint) {
@@ -149,6 +154,7 @@ export class PointVolume {
     this.works.fill(0);
     this.publicBuildings = [];
     this.publicBuildingOfPoint.fill(0);
+    this.fountains = [];
   }
 
   // every filled place as { pointIndex, level, tier }
