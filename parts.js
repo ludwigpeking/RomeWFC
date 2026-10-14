@@ -102,6 +102,10 @@ export class PartCollector {
     if (!keepsItsOwnLayout) {
       prepared.deleteAttribute('uv');
     }
+    // (the normals of a part are thrown away: the merged mesh computes its own, flat, over all
+    // its triangles; carrying and turning them with every part was a good share of a rebuild,
+    // 2026-10-14)
+    prepared.deleteAttribute('normal');
     prepared.applyMatrix4(this.placement);
     prepared.userData.tag = this.tag;
     if (materialName === 'tile' && !prepared.getAttribute('color')) {
@@ -332,8 +336,7 @@ export class PartCollector {
     if (tints) {
       geometry.setAttribute('color', new THREE.Float32BufferAttribute(tints, 3));
     }
-    geometry.computeVertexNormals();
-    this.add(materialName, geometry);
+    this.add(materialName, geometry); // (the normals come with the merged mesh)
   }
 
   // A flight of steps rising towards -z, its top edge at z = topEdgeZ
@@ -351,21 +354,39 @@ export class PartCollector {
     const group = new THREE.Group();
     this.geometriesOfMaterial.forEach(function (geometries, materialName) {
       const tile = atlasLayout.tiles[materialName];
+      // the tints of the parts are written once into the merged mesh's colours, by the range of
+      // each part (a colour attribute on every part before merging cost a rebuild a good share)
+      const tintsOfParts = [];
+      let pointCountOfAll = 0;
       geometries.forEach(function (geometry) {
         if (!geometry.getAttribute('uv')) {
           layOutOnItsTile(geometry, tile ? tile.metresPerRepeat : 1);
         }
-        if (!geometry.getAttribute('color')) {
-          const tint = geometry.userData.tint || [1, 1, 1];
-          const pointCount = geometry.getAttribute('position').count;
-          const tints = new Float32Array(pointCount * 3);
-          for (let pointNumber = 0; pointNumber < pointCount; pointNumber++) {
-            tints.set(tint, pointNumber * 3);
-          }
-          geometry.setAttribute('color', new THREE.BufferAttribute(tints, 3));
+        const ownColours = geometry.getAttribute('color');
+        tintsOfParts.push(ownColours ? ownColours.array : (geometry.userData.tint || null));
+        if (ownColours) {
+          geometry.deleteAttribute('color');
         }
+        pointCountOfAll += geometry.getAttribute('position').count;
       });
       const merged = mergeGeometries(geometries, false);
+      const colours = new Float32Array(pointCountOfAll * 3).fill(1);
+      let pointsWritten = 0;
+      geometries.forEach(function (geometry, partNumber) {
+        const pointCount = geometry.getAttribute('position').count;
+        const tint = tintsOfParts[partNumber];
+        if (tint !== null && tint.length === pointCount * 3) {
+          colours.set(tint, pointsWritten * 3);
+        } else if (tint !== null && (tint[0] !== 1 || tint[1] !== 1 || tint[2] !== 1)) {
+          for (let pointNumber = 0; pointNumber < pointCount; pointNumber++) {
+            colours[(pointsWritten + pointNumber) * 3] = tint[0];
+            colours[(pointsWritten + pointNumber) * 3 + 1] = tint[1];
+            colours[(pointsWritten + pointNumber) * 3 + 2] = tint[2];
+          }
+        }
+        pointsWritten += pointCount;
+      });
+      merged.setAttribute('color', new THREE.BufferAttribute(colours, 3));
       merged.computeVertexNormals();
       const mesh = new THREE.Mesh(merged, materials[materialName]);
       mesh.castShadow = true;
@@ -381,11 +402,13 @@ export class PartCollector {
 // that the courses of a tile run level along walls and along the eaves of roofs.
 function layOutOnItsTile(geometry, metresPerRepeat) {
   const positions = geometry.getAttribute('position');
+  const coordinates = positions.array; // (read straight from the array: the accessors were slow over a whole town)
   const layout = new Float32Array(positions.count * 2);
   for (let firstPoint = 0; firstPoint + 2 < positions.count; firstPoint += 3) {
-    const firstX = positions.getX(firstPoint), firstY = positions.getY(firstPoint), firstZ = positions.getZ(firstPoint);
-    const toSecondX = positions.getX(firstPoint + 1) - firstX, toSecondY = positions.getY(firstPoint + 1) - firstY, toSecondZ = positions.getZ(firstPoint + 1) - firstZ;
-    const toThirdX = positions.getX(firstPoint + 2) - firstX, toThirdY = positions.getY(firstPoint + 2) - firstY, toThirdZ = positions.getZ(firstPoint + 2) - firstZ;
+    const at = firstPoint * 3;
+    const firstX = coordinates[at], firstY = coordinates[at + 1], firstZ = coordinates[at + 2];
+    const toSecondX = coordinates[at + 3] - firstX, toSecondY = coordinates[at + 4] - firstY, toSecondZ = coordinates[at + 5] - firstZ;
+    const toThirdX = coordinates[at + 6] - firstX, toThirdY = coordinates[at + 7] - firstY, toThirdZ = coordinates[at + 8] - firstZ;
     let normalX = toSecondY * toThirdZ - toSecondZ * toThirdY;
     let normalY = toSecondZ * toThirdX - toSecondX * toThirdZ;
     let normalZ = toSecondX * toThirdY - toSecondY * toThirdX;
@@ -395,7 +418,7 @@ function layOutOnItsTile(geometry, metresPerRepeat) {
     normalZ /= normalLength;
     const steepness = Math.hypot(normalX, normalZ); // 0 lying flat, 1 standing upright
     for (let corner = 0; corner < 3; corner++) {
-      const x = positions.getX(firstPoint + corner), y = positions.getY(firstPoint + corner), z = positions.getZ(firstPoint + corner);
+      const x = coordinates[at + corner * 3], y = coordinates[at + corner * 3 + 1], z = coordinates[at + corner * 3 + 2];
       let along = x;
       let up = z;
       if (steepness > 0.3) {

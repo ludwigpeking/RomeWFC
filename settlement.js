@@ -287,6 +287,20 @@ export class Settlement {
     this.neighboursOfPoint = map.points.map(function (point, pointIndex) {
       return Array.from(map.sideNeighboursOfPoint[pointIndex]);
     });
+    // the arrays of the way search (findWay), kept from one search to the next; and the longest
+    // edge of the grid, for the search's guide
+    this.waySearch = {
+      number: 0, costTo: new Float64Array(pointCount), cameFrom: new Int32Array(pointCount),
+      seenIn: new Int32Array(pointCount), goalIn: new Int32Array(pointCount), closedIn: new Int32Array(pointCount),
+      heapCosts: new Float64Array(pointCount * 8), heapPoints: new Int32Array(pointCount * 8),
+    };
+    let longestStep = 0;
+    this.neighboursOfPoint.forEach(function (neighbours, pointIndex) {
+      neighbours.forEach(function (neighbourPoint) {
+        longestStep = Math.max(longestStep, Math.hypot(map.points[neighbourPoint].x - map.points[pointIndex].x, map.points[neighbourPoint].z - map.points[pointIndex].z));
+      });
+    });
+    this.longestStepMetres = longestStep || 1;
     // the middle of the map, where the first settler stops; and the two other towns, on the rim
     const middleX = (map.bounds.minX + map.bounds.maxX) / 2;
     const middleZ = (map.bounds.minZ + map.bounds.maxZ) / 2;
@@ -1365,12 +1379,23 @@ export class Settlement {
   // built; the square of a fountain is crossed like a street. A place is a household, a venue, the forum or another town: anything with
   // pointIndices. Returns { points, cost, crossedBuildings }, or null where there is no way.
   findWay(origin, destination, mayCrossBuildings) {
+    // (2026-10-14: an A* search with the straight-line distance as its guide, on arrays kept
+    // from one search to the next, with a heap of two typed arrays. It finds a way of the same
+    // cost as the plain search did, visiting a fraction of the points; the way search was over
+    // half of a day's simulation.)
     const settlement = this;
     const pointCount = this.map.points.length;
-    const costTo = new Float64Array(pointCount).fill(Infinity);
-    const cameFrom = new Int32Array(pointCount).fill(-1);
-    const isGoal = new Uint8Array(pointCount);
+    const points = this.map.points;
+    const search = this.waySearch;
+    search.number++;
+    const searchNumber = search.number;
+    const costTo = search.costTo;
+    const cameFrom = search.cameFrom;
+    const seenIn = search.seenIn;     // the search a point was last seen in: its cost holds only then
+    const goalIn = search.goalIn;     // the search a point was last a goal in
     const stepsABuildingCosts = parametersInUse.stepsABuildingCosts;
+    const leastStepCost = 0.5;        // (costOfStepOnto is never less)
+    const longestStep = this.longestStepMetres;
     function mayStepOnto(pointIndex) {
       const works = settlement.volume.works[pointIndex];
       if ((works & WORK.wall) !== 0) {
@@ -1390,100 +1415,150 @@ export class Settlement {
       return 1 / (2 * journeyCount) + 0.5 + (settlement.ownerOfPoint[pointIndex] === null ? 0 : stepsABuildingCosts);
     }
     // a place that is a point of free ground (another town, the forum) is a goal itself; a
-    // building is reached at the free ground beside it
+    // building is reached at the free ground beside it. The guide: the straight line to the
+    // circle round the goals, in steps of the longest edge, at the least cost of a step: never
+    // more than the way will cost, so the first goal reached is the cheapest.
+    let goalCount = 0;
+    let goalCentreX = 0;
+    let goalCentreZ = 0;
+    function markGoal(pointIndex) {
+      if (goalIn[pointIndex] !== searchNumber) {
+        goalIn[pointIndex] = searchNumber;
+        goalCount++;
+        goalCentreX += points[pointIndex].x;
+        goalCentreZ += points[pointIndex].z;
+      }
+    }
     destination.pointIndices.forEach(function (pointIndex) {
       if (settlement.ownerOfPoint[pointIndex] === null && mayStepOnto(pointIndex)) {
-        isGoal[pointIndex] = 1;
+        markGoal(pointIndex);
       }
       settlement.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
         if (mayStepOnto(neighbourPoint)) {
-          isGoal[neighbourPoint] = 1;
+          markGoal(neighbourPoint);
         }
       });
     });
-    const heap = [];
-    function push(cost, pointIndex) {
-      heap.push([cost, pointIndex]);
-      let child = heap.length - 1;
+    if (goalCount === 0) {
+      return null;
+    }
+    goalCentreX /= goalCount;
+    goalCentreZ /= goalCount;
+    let goalRadius = 0;
+    destination.pointIndices.forEach(function (pointIndex) {
+      [pointIndex].concat(settlement.neighboursOfPoint[pointIndex]).forEach(function (goalPoint) {
+        if (goalIn[goalPoint] === searchNumber) {
+          goalRadius = Math.max(goalRadius, Math.hypot(points[goalPoint].x - goalCentreX, points[goalPoint].z - goalCentreZ));
+        }
+      });
+    });
+    const guideScale = leastStepCost / longestStep;
+    function guideFrom(pointIndex) {
+      const point = points[pointIndex];
+      const acrossX = point.x - goalCentreX;
+      const acrossZ = point.z - goalCentreZ;
+      const distance = Math.sqrt(acrossX * acrossX + acrossZ * acrossZ) - goalRadius; // (Math.hypot was a tenth of a day's simulation)
+      return distance > 0 ? distance * guideScale : 0;
+    }
+    // the heap of the points to look at, by their cost so far plus the guide
+    let heapCosts = search.heapCosts;
+    let heapPoints = search.heapPoints;
+    let heapSize = 0;
+    function push(priority, pointIndex) {
+      if (heapSize === heapCosts.length) { // (room for twice as many entries)
+        const widerCosts = new Float64Array(heapCosts.length * 2);
+        const widerPoints = new Int32Array(heapPoints.length * 2);
+        widerCosts.set(heapCosts);
+        widerPoints.set(heapPoints);
+        search.heapCosts = heapCosts = widerCosts;
+        search.heapPoints = heapPoints = widerPoints;
+      }
+      let child = heapSize++;
       while (child > 0) {
         const parent = (child - 1) >> 1;
-        if (heap[parent][0] <= heap[child][0]) {
+        if (heapCosts[parent] <= priority) {
           break;
         }
-        const swapped = heap[parent];
-        heap[parent] = heap[child];
-        heap[child] = swapped;
+        heapCosts[child] = heapCosts[parent];
+        heapPoints[child] = heapPoints[parent];
         child = parent;
       }
+      heapCosts[child] = priority;
+      heapPoints[child] = pointIndex;
     }
-    function pop() {
-      const least = heap[0];
-      const last = heap.pop();
-      if (heap.length > 0) {
-        heap[0] = last;
+    function popPoint() {
+      const least = heapPoints[0];
+      heapSize--;
+      if (heapSize > 0) {
+        const priority = heapCosts[heapSize];
+        const pointIndex = heapPoints[heapSize];
         let parent = 0;
         for (;;) {
-          let smallest = parent;
           const left = 2 * parent + 1;
-          const right = left + 1;
-          if (left < heap.length && heap[left][0] < heap[smallest][0]) {
-            smallest = left;
-          }
-          if (right < heap.length && heap[right][0] < heap[smallest][0]) {
-            smallest = right;
-          }
-          if (smallest === parent) {
+          if (left >= heapSize) {
             break;
           }
-          const swapped = heap[parent];
-          heap[parent] = heap[smallest];
-          heap[smallest] = swapped;
-          parent = smallest;
+          const right = left + 1;
+          const smaller = right < heapSize && heapCosts[right] < heapCosts[left] ? right : left;
+          if (heapCosts[smaller] >= priority) {
+            break;
+          }
+          heapCosts[parent] = heapCosts[smaller];
+          heapPoints[parent] = heapPoints[smaller];
+          parent = smaller;
         }
+        heapCosts[parent] = priority;
+        heapPoints[parent] = pointIndex;
       }
       return least;
     }
+    function reach(pointIndex, cost, fromPoint) {
+      if (seenIn[pointIndex] === searchNumber && costTo[pointIndex] <= cost) {
+        return;
+      }
+      seenIn[pointIndex] = searchNumber;
+      costTo[pointIndex] = cost;
+      cameFrom[pointIndex] = fromPoint;
+      push(cost + guideFrom(pointIndex), pointIndex);
+    }
     origin.pointIndices.forEach(function (pointIndex) {
-      if (settlement.ownerOfPoint[pointIndex] === null && costTo[pointIndex] === Infinity) {
-        costTo[pointIndex] = 0; // (a place that is free ground itself)
-        push(0, pointIndex);
+      if (settlement.ownerOfPoint[pointIndex] === null) {
+        reach(pointIndex, 0, -1); // (a place that is free ground itself)
       }
       settlement.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
-        if (mayStepOnto(neighbourPoint) && costTo[neighbourPoint] === Infinity) {
-          costTo[neighbourPoint] = costOfStepOnto(neighbourPoint);
-          push(costTo[neighbourPoint], neighbourPoint);
+        if (mayStepOnto(neighbourPoint)) {
+          reach(neighbourPoint, costOfStepOnto(neighbourPoint), -1);
         }
       });
     });
-    while (heap.length > 0) {
-      const least = pop();
-      const pointIndex = least[1];
-      if (least[0] > costTo[pointIndex]) {
-        continue;
+    const closedIn = search.closedIn; // the search a point was settled in: looked at once
+    while (heapSize > 0) {
+      const pointIndex = popPoint();
+      if (closedIn[pointIndex] === searchNumber) {
+        continue; // (a stale entry: the point was reached cheaper later)
       }
-      if (isGoal[pointIndex]) {
-        const points = [];
+      closedIn[pointIndex] = searchNumber;
+      if (goalIn[pointIndex] === searchNumber) {
+        const wayPoints = [];
         const crossedBuildings = [];
         for (let step = pointIndex; step !== -1; step = cameFrom[step]) {
           if (this.ownerOfPoint[step] === null) {
-            points.push(step);
+            wayPoints.push(step);
           } else {
             crossedBuildings.push(step);
           }
         }
-        return { points: points, cost: least[0], crossedBuildings: crossedBuildings };
+        return { points: wayPoints, cost: costTo[pointIndex], crossedBuildings: crossedBuildings };
       }
-      this.neighboursOfPoint[pointIndex].forEach(function (neighbourPoint) {
-        if (!mayStepOnto(neighbourPoint)) {
-          return;
+      const costHere = costTo[pointIndex];
+      const neighbours = this.neighboursOfPoint[pointIndex];
+      for (let neighbourNumber = 0; neighbourNumber < neighbours.length; neighbourNumber++) {
+        const neighbourPoint = neighbours[neighbourNumber];
+        if (closedIn[neighbourPoint] === searchNumber || !mayStepOnto(neighbourPoint)) {
+          continue;
         }
-        const cost = least[0] + costOfStepOnto(neighbourPoint);
-        if (cost < costTo[neighbourPoint]) {
-          costTo[neighbourPoint] = cost;
-          cameFrom[neighbourPoint] = pointIndex;
-          push(cost, neighbourPoint);
-        }
-      });
+        reach(neighbourPoint, costHere + costOfStepOnto(neighbourPoint), pointIndex);
+      }
     }
     return null;
   }

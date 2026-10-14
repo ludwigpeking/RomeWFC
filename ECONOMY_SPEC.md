@@ -224,3 +224,11 @@ What the code assumes to run it (ASSUMED in settlement.js):
 - 2026-10-13 (the author): when a new outer wall is built, the old inner wall is torn down where
   the new one does not stand on it; its ground is free again, for the city to sell. (Until then
   the walls that stood stayed, and the town kept its inner ring.)
+
+- 2026-10-14, speed: the way search is an A* search guided by the straight-line distance (an
+  admissible guide: the same cost as the plain search, a fraction of the points visited), on
+  arrays kept between searches. Where two ways cost the same it may take the other one, so a
+  town grown after this date is not point for point the town the same seed grew before. The
+  part collector no longer carries normals and colours on every part before merging. On the
+  irregular ground of 18 rings at day 2,000: a day of simulation 177 to 80 ms, a rebuild of
+  the town 6.4 to 4.9 s, the garbage of a rebuild about a third less.
