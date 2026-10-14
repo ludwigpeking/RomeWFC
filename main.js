@@ -27,6 +27,9 @@ import { Settlement, roadRecentTraffic, SETTLEMENT_PARAMETER_DEFAULTS, LAYER_BAN
 import { PUBLIC_BUILDINGS } from './city';
 import { MODELS } from './models';
 import { listPieceKinds, describePiece, pieceGeometry, placedPieceGeometry, measuresOfKind, minceModel } from './mince';
+import { createPanelHeading, decorateExistingPanelHeadings } from './panelIcons';
+
+decorateExistingPanelHeadings();
 
 let squarePointCount = 30;    // points along each side of the square map (chosen in the Ground tab)
 let irregularRingCount = 8;   // rings of the irregular map: at 8 about as many points as the square map of 30 (chosen in the menu)
@@ -102,8 +105,6 @@ function showPlanView(isOn) {
   }
   controls.enabled = !isOn && !isWalking;
   planControls.enabled = isOn;
-  // (the plan is a map: the line of numbers at the foot of the window would cover it)
-  document.getElementById('liveStatistics').style.display = isOn ? 'none' : '';
   document.getElementById('planViewButton').classList.toggle('active', isOn);
   document.getElementById('perspectiveViewButton').classList.toggle('active', !isOn);
 }
@@ -793,9 +794,7 @@ function showStreets() {
 // tab, and the households over the days as a chart.
 let householdHistory = []; // { day, inHuts, inHouses, classical }
 function showStatistics() {
-  const line = document.getElementById('liveStatistics');
   if (settlement === null) {
-    line.style.display = 'none';
     showStatisticCards({});
     householdHistory = [];
     drawHistory();
@@ -808,11 +807,6 @@ function showStatistics() {
     }
     householdHistory.push({ day: statistics.days, inHuts: statistics.householdsInHuts, inHouses: statistics.householdsInHouses, classical: statistics.householdsClassical });
   }
-  line.style.display = isPlanView ? 'none' : 'block';
-  line.textContent = 'Day ' + statistics.days + ' · ' + statistics.households + ' households (' + statistics.householdsInHuts + ' huts, ' +
-    statistics.householdsInHouses + ' houses, ' + statistics.householdsClassical + ' classical) · treasury ' + Math.round(settlement.city.money) +
-    ' · public: ' + (statistics.publicBuildings || 'none') + ' · ' + statistics.fountains + ' fountains, ' + statistics.householdsWithoutWater + ' households without water · ' +
-    (statistics.wallPoints > 0 ? 'wall of ' + (statistics.wallPoints + statistics.gates) + ' points, ' + statistics.gates + ' gates' : 'no wall');
   showStatisticCards(Object.assign({ treasury: Math.round(settlement.city.money) }, statistics));
   const richest = document.getElementById('richestHouseholds');
   richest.innerHTML = '';
@@ -883,9 +877,7 @@ function showStatisticCards(statistics) {
     }
     const card = document.createElement('div');
     card.className = 'card numbers';
-    const title = document.createElement('div');
-    title.className = 'cardTitle';
-    title.textContent = group[0];
+    const title = createPanelHeading(group[0]);
     card.appendChild(title);
     names.forEach(function (name) {
       namesPlaced.add(name);
@@ -966,7 +958,7 @@ function showDataLayer() {
     dataLayerOverlay = null;
   }
   // (a layer with fixed bands names them: the same colour for the same value, always)
-  document.getElementById('dataLayerLegend').textContent = DATA_LAYER_LEGENDS[dataLayerName] +
+  document.getElementById('dataLayerLegend').textContent = dataLayerName === 'none' ? '' : DATA_LAYER_LEGENDS[dataLayerName] +
     (LAYER_BANDS[dataLayerName] ? ' Fixed bands, pale to red, from: ' + LAYER_BANDS[dataLayerName].join(', ') + '.' : '');
   if (settlement === null || dataLayerName === 'none') {
     return;
@@ -1164,9 +1156,7 @@ const PARAMETER_GROUPS = [
       if (group.firstParameter === name) {
         card = document.createElement('div');
         card.className = 'card';
-        const title = document.createElement('div');
-        title.className = 'cardTitle';
-        title.textContent = group.title;
+        const title = createPanelHeading(group.title);
         const about = document.createElement('div');
         about.className = 'cardHint';
         about.textContent = group.about;
@@ -1393,29 +1383,6 @@ function showSavedRun(run) {
   document.getElementById('settlementStatus').textContent = settlement.summary();
 }
 
-// the list of the saved runs, where there is one (the app served from its folder)
-fetch('tools/runs/index.json').then(function (response) {
-  return response.ok ? response.json() : [];
-}).then(function (runs) {
-  const list = document.getElementById('savedRunList');
-  let groupElement = null;
-  let groupTitle = null;
-  runs.forEach(function (run) {
-    if (run.group && run.group !== groupTitle) {
-      groupTitle = run.group;
-      groupElement = document.createElement('optgroup');
-      groupElement.label = groupTitle;
-      list.appendChild(groupElement);
-    }
-    const entry = document.createElement('option');
-    entry.value = run.file;
-    entry.textContent = run.label;
-    (groupElement || list).appendChild(entry);
-  });
-  document.getElementById('savedRunHint').textContent = runs.length > 0 ? runs.length + ' runs saved. Choose one and load it.' : 'No runs saved yet (node tools/test_runs.js).';
-}).catch(function () {
-  document.getElementById('savedRunHint').textContent = 'No runs saved yet (node tools/test_runs.js).';
-});
 // Save: the town with its settlement and its parameters, as a file the browser hands over. Load:
 // such a file, or one a tool saved; Settle then lets it live on with its own parameters.
 document.getElementById('saveTownButton').addEventListener('click', function () {
@@ -1589,21 +1556,6 @@ function emptyTheSlot(slotNumber) {
   });
 }
 showTheSlots();
-
-document.getElementById('loadSavedRunButton').addEventListener('click', function () {
-  const file = document.getElementById('savedRunList').value;
-  if (!file) {
-    return;
-  }
-  document.getElementById('savedRunHint').textContent = 'Loading ' + file + ' ...';
-  fetch('tools/runs/' + file).then(function (response) {
-    return response.json();
-  }).then(function (run) {
-    showSavedRun(run);
-    const parameterTexts = Object.keys(run.parameters).map(function (name) { return name + ' ' + run.parameters[name]; });
-    document.getElementById('savedRunHint').textContent = run.label + ' · ' + parameterTexts.join(' · ');
-  });
-});
 
 // Called every frame: lets the days pass, and rebuilds the town now and then when it has changed
 function letTheSettlementLive(now) {
@@ -1982,7 +1934,15 @@ function walkAStep(secondsPassed) {
 window.addEventListener('keydown', function (event) {
   keysHeldDown.add(event.key.toLowerCase());
   if (event.key === 'Escape') {
-    stopWalking();
+    if (isWalking) {
+      stopWalking();
+      return;
+    }
+    // (the author, 2026-10-14: Escape closes whatever panel is open, or opens the menu)
+    const openPanel = ['menuPanel', 'settingsPanel', 'statisticsPanel', 'catalogue'].find(function (name) {
+      return !document.getElementById(name).classList.contains('hidden');
+    });
+    showPanel(openPanel || 'menuPanel', !openPanel);
   }
 });
 window.addEventListener('keyup', function (event) {
@@ -2144,7 +2104,7 @@ window.rome = {
   },
   // the interface hidden, the shadows reaching over the whole ground; returns the bounds
   filmScreen: function () {
-    ['toolbar', 'catalogue', 'statusStrip', 'liveStatistics', 'householdTip', 'walkHint', 'rightCol', 'settingsPanel', 'menuPanel', 'statisticsPanel'].forEach(function (elementName) {
+    ['toolbar', 'catalogue', 'statusStrip', 'householdTip', 'walkHint', 'rightCol', 'settingsPanel', 'menuPanel', 'statisticsPanel'].forEach(function (elementName) {
       const element = document.getElementById(elementName);
       if (element) {
         element.style.display = 'none';
@@ -2178,7 +2138,6 @@ window.rome = {
       rebuildSettledTown();
     }
     showDataLayer();
-    document.getElementById('liveStatistics').style.display = 'none';
     dataPointMark.visible = false;
     return {
       day: settlement.dayCount, statistics: settlement.statistics(), treasury: Math.round(settlement.city.money),
@@ -2189,7 +2148,6 @@ window.rome = {
   filmLayer: function (layerName) {
     dataLayerName = layerName;
     showDataLayer();
-    document.getElementById('liveStatistics').style.display = 'none';
     dataPointMark.visible = false;
     return true;
   },

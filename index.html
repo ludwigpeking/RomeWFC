@@ -267,6 +267,34 @@
       font-size: 12px;
       line-height: 1.4;
     }
+    .cardTitleWithIcon {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      margin-bottom: 10px;
+    }
+    .panelHeadingIcon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 40px;
+      width: 40px;
+      height: 40px;
+      box-sizing: border-box;
+      border: 1.5px solid currentColor;
+      border-radius: 50%;
+      color: #333333;
+    }
+    .panelHeadingIcon svg {
+      width: 32px;
+      height: 32px;
+    }
+    .panelHeadingLabel {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      line-height: 1.4;
+    }
     .statisticRow {
       display: flex;
       justify-content: space-between;
@@ -418,10 +446,6 @@
     #settlementStatus {
       color: #23262b;
     }
-    #liveStatistics {
-      display: none;
-      font-variant-numeric: tabular-nums;
-    }
     .sectionTitle {
       margin: 10px 0 6px;
       font-size: 11px;
@@ -467,6 +491,20 @@
     .hint {
       color: #6d675c;
       line-height: 1.45;
+    }
+    .hint:empty {
+      display: none;
+    }
+    .quietButton {
+      padding: 3px;
+      border: none;
+      background: transparent;
+      color: #8a8275;
+      font-size: 12px;
+      text-align: center;
+    }
+    .quietButton:hover {
+      color: #23262b;
     }
     #monumentList {
       margin-top: 4px;
@@ -533,7 +571,6 @@
   <div id="statusStrip">
     <div id="settlementStatus">Nobody lives here yet. Settle lets people arrive, travel, grow rich and rebuild.</div>
     <div id="dataLayerLegend">No data shown.</div>
-    <div id="liveStatistics"></div>
   </div>
   <div id="menuPanel" class="sidePanel hidden">
     <button class="ui-btn panelClose" id="menuCloseButton" type="button" title="Close">&#10005;</button>
@@ -557,21 +594,14 @@
     </div>
     <div class="hint">A point is 4 m. A larger ground takes longer to make, to settle and to rebuild; choosing a size makes the ground anew.</div>
     <div class="sectionTitle">SAVE AND LOAD</div>
-    <div class="buttonRow">
-      <button id="saveTownButton" title="Save the town as it stands, with its settlement and its parameters, as a file">Save</button>
-      <button id="loadTownButton" title="Load a saved town from a file; Settle lets it live on with its own parameters">Load</button>
-    </div>
-    <input id="loadTownInput" type="file" accept=".json,application/json" style="display: none;">
-    <div id="saveLoadHint" class="hint">A saved town is a .json file; it loads with its parameters and can be settled on.</div>
-    <div class="sectionTitle">SLOTS</div>
     <div id="saveSlots" class="slotList"></div>
     <div id="slotHint" class="hint">Looking for the slots ...</div>
-    <div class="sectionTitle">SAVED RUNS OF THE TOOLS</div>
-    <div class="buttonColumn">
-      <select id="savedRunList" style="width: 100%; padding: 6px; font: inherit;"></select>
-      <button id="loadSavedRunButton" title="Show the town of a saved run as it stood at its end; Settle lets it live on">Load run</button>
+    <div class="buttonRow" style="margin-top: 6px;">
+      <button id="saveTownButton" class="quietButton" title="Save the town as it stands, with its settlement and its parameters, as a file in the downloads">Save to a file</button>
+      <button id="loadTownButton" class="quietButton" title="Load a town from a saved file; Settle lets it live on with its own parameters">Load from a file</button>
     </div>
-    <div id="savedRunHint" class="hint">Looking for saved runs ...</div>
+    <input id="loadTownInput" type="file" accept=".json,application/json" style="display: none;">
+    <div id="saveLoadHint" class="hint"></div>
   </div>
   <!-- The parameters and the statistics stand in the middle of the window, in cards by their
        subject, so that a parameter is found by what it is about -->
