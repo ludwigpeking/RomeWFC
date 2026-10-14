@@ -1238,9 +1238,20 @@ function noteTheChangesOfThePanel(cause) {
   settingsShown = settings;
   showParameterHistory();
 }
+// a time kept in the ISO form (UTC) shown in the clock of this computer: '2026-10-13 20:20'
+function wordsOfTime(isoTime) {
+  const time = new Date(isoTime);
+  if (Number.isNaN(time.getTime())) {
+    return String(isoTime);
+  }
+  function twoDigits(number) {
+    return String(number).padStart(2, '0');
+  }
+  return time.getFullYear() + '-' + twoDigits(time.getMonth() + 1) + '-' + twoDigits(time.getDate()) + ' ' + twoDigits(time.getHours()) + ':' + twoDigits(time.getMinutes());
+}
 function wordsOfParameterChange(entry) {
   const name = entry.name.indexOf('householdsNeededFor:') === 0 ? 'households needed for a ' + wordsOfName(entry.name.slice('householdsNeededFor:'.length)) : wordsOfName(entry.name);
-  return entry.time.slice(0, 16).replace('T', ' ') + ' · ' + name + ': ' + entry.from + ' → ' + entry.to + (entry.cause && entry.cause !== 'set in the panel' ? ' (' + entry.cause + ')' : '');
+  return wordsOfTime(entry.time) + ' · ' + name + ': ' + entry.from + ' → ' + entry.to + (entry.cause && entry.cause !== 'set in the panel' ? ' (' + entry.cause + ')' : '');
 }
 function showParameterHistory() {
   const list = document.getElementById('parameterHistory');
@@ -1306,7 +1317,7 @@ document.getElementById('loadParametersInput').addEventListener('change', functi
       const loaded = JSON.parse(reader.result);
       const settings = loaded.settings || loaded.parameters || loaded;
       applySettingsToThePanel(settings, 'loaded from ' + file.name);
-      document.getElementById('parameterFileStatus').textContent = 'Loaded ' + file.name + (loaded.savedAt ? ', saved ' + loaded.savedAt.slice(0, 16).replace('T', ' ') : '') + '.';
+      document.getElementById('parameterFileStatus').textContent = 'Loaded ' + file.name + (loaded.savedAt ? ', saved ' + wordsOfTime(loaded.savedAt) : '') + '.';
     } catch (error) {
       document.getElementById('parameterFileStatus').textContent = 'Not a parameters file: ' + error.message;
     }
@@ -1467,7 +1478,7 @@ function thumbnailOfTheView() {
   return picture.toDataURL('image/jpeg', 0.8);
 }
 function wordsOfSlot(meta) {
-  return meta.label + (meta.savedAt ? ' · ' + meta.savedAt.slice(0, 16).replace('T', ' ') : '');
+  return meta.label + (meta.savedAt ? ' · ' + wordsOfTime(meta.savedAt) : '');
 }
 function showSlotHint(text) {
   document.getElementById('slotHint').textContent = text;
@@ -1495,7 +1506,7 @@ function showTheSlots() {
       words.textContent = 'Slot ' + slot.slot + (slot.meta ? ': ' + slot.meta.label : ': empty');
       if (slot.meta && slot.meta.savedAt) {
         const when = document.createElement('small');
-        when.textContent = 'saved ' + slot.meta.savedAt.slice(0, 16).replace('T', ' ');
+        when.textContent = 'saved ' + wordsOfTime(slot.meta.savedAt);
         words.appendChild(when);
       }
       const buttons = document.createElement('div');
