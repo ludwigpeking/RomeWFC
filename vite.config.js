@@ -126,6 +126,9 @@ const saveSlotsPlugin = {
 };
 
 export default {
+  // Relative addresses in the built page, so that it runs from any folder: GitHub Pages serves it
+  // under /RomeWFC/, not at the root of the site.
+  base: './',
   plugins: [saveSlotsPlugin],
   server: {
     hmr: false,
